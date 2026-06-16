@@ -7,6 +7,7 @@ import {
   YAxis,
   CartesianGrid,
   Tooltip,
+  Legend,
   ResponsiveContainer,
 } from "recharts";
 import type { MeterReading } from "@/types";
@@ -23,6 +24,7 @@ export default function DeltaChart({ readings }: Props) {
     .map((r) => ({
       zaman: formatTimestamp(r.timestamp_unix),
       sayac_delta: r.sayac_delta,
+      devir_delta: r.devir_delta,
     }));
 
   if (data.length === 0) {
@@ -36,7 +38,7 @@ export default function DeltaChart({ readings }: Props) {
   return (
     <div className="rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
       <h2 className="mb-4 text-sm font-semibold text-zinc-700 dark:text-zinc-300">
-        Sayaç Değişimi (delta)
+        Değişim Grafiği (delta)
       </h2>
       <ResponsiveContainer width="100%" height={288}>
         <LineChart data={data} margin={{ top: 8, right: 16, bottom: 8, left: 0 }}>
@@ -50,12 +52,29 @@ export default function DeltaChart({ readings }: Props) {
           <YAxis tick={{ fontSize: 11 }} stroke="#a1a1aa" allowDecimals={false} />
           <Tooltip
             contentStyle={{ fontSize: 12, borderRadius: 8 }}
-            formatter={(value) => [value, "sayac_delta"]}
+            formatter={(value, name) => [
+              value,
+              name === "sayac_delta" ? "Sayaç Δ" : "Devir Δ",
+            ]}
+          />
+          <Legend
+            formatter={(value) =>
+              value === "sayac_delta" ? "Sayaç Δ" : "Devir Δ"
+            }
+            wrapperStyle={{ fontSize: 12 }}
           />
           <Line
             type="monotone"
             dataKey="sayac_delta"
             stroke="#10b981"
+            strokeWidth={2}
+            dot={{ r: 2 }}
+            connectNulls
+          />
+          <Line
+            type="monotone"
+            dataKey="devir_delta"
+            stroke="#6366f1"
             strokeWidth={2}
             dot={{ r: 2 }}
             connectNulls

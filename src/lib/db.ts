@@ -12,6 +12,8 @@ const pool =
     database: process.env.POSTGRES_DB,
     user: process.env.POSTGRES_USER,
     password: process.env.POSTGRES_PASSWORD,
+    // Neon ve diğer hosted PostgreSQL sağlayıcıları SSL zorunlu tutar.
+    ssl: process.env.POSTGRES_SSL === "false" ? false : { rejectUnauthorized: false },
   });
 
 if (process.env.NODE_ENV !== "production") {
