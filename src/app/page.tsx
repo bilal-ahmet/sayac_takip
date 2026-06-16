@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useState } from "react";
 import type { DeviceWithStats, MeterReading } from "@/types";
-import { formatTimestamp, deltaColorClass, formatDelta } from "@/lib/utils";
+import { formatTimestamp } from "@/lib/utils";
 import DeviceSelector from "@/components/DeviceSelector";
 import StatsCard from "@/components/StatsCard";
 import DeltaChart from "@/components/DeltaChart";
@@ -95,7 +95,9 @@ export default function Home() {
 
   // Özet istatistikler (okumalar DESC; ilk eleman en yeni).
   const latest = readings[0];
-  const lastSayacDelta = readings.find((r) => r.sayac_delta != null)?.sayac_delta;
+  const totalSayac = latest
+    ? latest.baslangic + readings.reduce((sum, r) => sum + r.sayac, 0)
+    : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
@@ -171,9 +173,8 @@ export default function Home() {
         />
         <StatsCard label="Devir" value={latest ? String(latest.devir) : "—"} />
         <StatsCard
-          label="Son Delta"
-          value={formatDelta(lastSayacDelta)}
-          valueClassName={deltaColorClass(lastSayacDelta)}
+          label="Toplam Sayaç"
+          value={totalSayac !== null ? totalSayac.toLocaleString("tr-TR") : "—"}
         />
       </section>
 
