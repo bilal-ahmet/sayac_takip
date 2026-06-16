@@ -9,7 +9,7 @@ import DeltaChart from "@/components/DeltaChart";
 import ReadingsTable from "@/components/ReadingsTable";
 import TimelineView from "@/components/TimelineView";
 
-const REFRESH_MS = 30_000;
+const REFRESH_MS = 5_000;
 
 export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
@@ -108,7 +108,7 @@ export default function Home() {
             {lastRefresh
               ? `Son yenileme: ${lastRefresh.toLocaleTimeString(
                   "tr-TR"
-                )} · 30 sn'de bir otomatik`
+                )} · 5 sn'de bir otomatik`
               : "Yükleniyor…"}
           </p>
         </div>
