@@ -173,8 +173,9 @@ export default function Home() {
         />
         <StatsCard label="Devir" value={latest ? String(latest.devir) : "—"} />
         <StatsCard
-          label="Toplam Sayaç"
+          label="Toplam Sayaç Değeri"
           value={totalSayac !== null ? totalSayac.toLocaleString("tr-TR") : "—"}
+          subtitle={latest ? `Başlangıç: ${latest.baslangic.toLocaleString("tr-TR")}` : undefined}
         />
       </section>
 
