@@ -95,9 +95,8 @@ export default function Home() {
 
   // Özet istatistikler (okumalar DESC; ilk eleman en yeni).
   const latest = readings[0];
-  const totalSayac = latest
-    ? latest.baslangic + readings.reduce((sum, r) => sum + r.sayac, 0)
-    : null;
+  // Toplam sayaç = başlangıç referansı + son okumanın anlık sayaç değeri.
+  const totalSayac = latest ? latest.baslangic + latest.sayac : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
@@ -174,8 +173,8 @@ export default function Home() {
         <StatsCard label="Devir" value={latest ? String(latest.devir) : "—"} />
         <StatsCard
           label="Toplam Sayaç Değeri"
-          value={totalSayac !== null ? totalSayac.toLocaleString("tr-TR") : "—"}
-          subtitle={latest ? `Başlangıç: ${latest.baslangic.toLocaleString("tr-TR")}` : undefined}
+          value={totalSayac !== null ? String(totalSayac) : "—"}
+          subtitle={latest ? `Başlangıç: ${latest.baslangic}` : undefined}
         />
       </section>
 
