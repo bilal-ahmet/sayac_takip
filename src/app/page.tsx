@@ -20,6 +20,9 @@ export default function Home() {
   // "Verileri Sıfırla" onay adımı: null → onay beklenmiyor, string → onay bekleniyor
   const [confirmReset, setConfirmReset] = useState<string | null>(null);
   const [resetting, setResetting] = useState(false);
+  // "Cihazı Sil" onay adımı
+  const [confirmDeleteDevice, setConfirmDeleteDevice] = useState<string | null>(null);
+  const [deletingDevice, setDeletingDevice] = useState(false);
 
   // Cihaz listesini çek.
   const loadDevices = useCallback(async () => {
@@ -41,7 +44,7 @@ export default function Home() {
   const loadReadings = useCallback(async (deviceId: string) => {
     try {
       const res = await fetch(
-        `/api/readings?device_id=${encodeURIComponent(deviceId)}&limit=200`
+        `/api/readings?device_id=${encodeURIComponent(deviceId)}`
       );
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
@@ -93,10 +96,31 @@ export default function Home() {
     }
   }
 
+  // Seçili cihazı ve tüm okumalarını sil.
+  async function handleDeleteDevice() {
+    if (!selected) return;
+    setDeletingDevice(true);
+    setConfirmDeleteDevice(null);
+    try {
+      const res = await fetch(
+        `/api/devices?device_id=${encodeURIComponent(selected)}`,
+        { method: "DELETE" }
+      );
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? "Cihaz silinemedi");
+      setReadings([]);
+      setSelected(null); // loadDevices ardından yeni ilk cihazı seçer
+      setError(null);
+      await loadDevices();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+    } finally {
+      setDeletingDevice(false);
+    }
+  }
+
   // Özet istatistikler (okumalar DESC; ilk eleman en yeni).
   const latest = readings[0];
-  // Toplam sayaç = başlangıç referansı + son okumanın anlık sayaç değeri.
-  const totalSayac = latest ? latest.baslangic + latest.sayac : null;
 
   return (
     <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
@@ -120,6 +144,7 @@ export default function Home() {
             onSelect={(id) => {
               setSelected(id);
               setConfirmReset(null);
+              setConfirmDeleteDevice(null);
             }}
           />
           {/* Sıfırlama butonu — iki adımlı onay */}
@@ -151,6 +176,36 @@ export default function Home() {
               </button>
             )
           )}
+          {/* Cihazı Sil butonu — iki adımlı onay */}
+          {selected && (
+            confirmDeleteDevice === selected ? (
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500 whitespace-nowrap">
+                  Cihaz silinsin mi?
+                </span>
+                <button
+                  onClick={handleDeleteDevice}
+                  disabled={deletingDevice}
+                  className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
+                >
+                  {deletingDevice ? "Siliniyor…" : "Evet, sil"}
+                </button>
+                <button
+                  onClick={() => setConfirmDeleteDevice(null)}
+                  className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+                >
+                  İptal
+                </button>
+              </div>
+            ) : (
+              <button
+                onClick={() => setConfirmDeleteDevice(selected)}
+                className="rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-600 shadow-sm transition hover:bg-red-50 dark:border-red-900 dark:bg-zinc-900 dark:text-red-400 dark:hover:bg-red-950"
+              >
+                Cihazı Sil
+              </button>
+            )
+          )}
         </div>
       </header>
 
@@ -173,7 +228,7 @@ export default function Home() {
         <StatsCard label="Devir" value={latest ? String(latest.devir) : "—"} />
         <StatsCard
           label="Toplam Sayaç Değeri"
-          value={totalSayac !== null ? String(totalSayac) : "—"}
+          value={latest?.toplam != null ? String(latest.toplam) : "—"}
           subtitle={latest ? `Başlangıç: ${latest.baslangic}` : undefined}
         />
       </section>

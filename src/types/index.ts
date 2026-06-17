@@ -7,6 +7,7 @@ export interface IncomingReading {
   sayac: number;
   devir: number;
   baslangic: number;
+  toplam?: number; // cihazın hesapladığı toplam (opsiyonel)
 }
 
 // devices tablosu satırı
@@ -32,6 +33,7 @@ export interface MeterReading {
   sayac: number;
   devir: number;
   baslangic: number;
+  toplam: number | null;
   sayac_delta: number | null;
   devir_delta: number | null;
 }

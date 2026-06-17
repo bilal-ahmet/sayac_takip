@@ -29,6 +29,8 @@ export async function POST(request: NextRequest) {
 
   const deviceId = normalizeDeviceId(body);
   const { timestamp, sayac, devir, baslangic } = body;
+  // toplam opsiyonel: sayı değilse null kaydedilir.
+  const toplam = typeof body.toplam === "number" ? body.toplam : null;
 
   if (
     !deviceId ||
@@ -77,10 +79,10 @@ export async function POST(request: NextRequest) {
     // 4) Okumayı kaydet.
     const inserted = await client.query<MeterReading>(
       `INSERT INTO meter_readings
-         (device_id, timestamp_unix, sayac, devir, baslangic, sayac_delta, devir_delta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7)
+         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, sayac_delta, devir_delta)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
        RETURNING id`,
-      [deviceId, timestamp, sayac, devir, baslangic, sayacDelta, devirDelta]
+      [deviceId, timestamp, sayac, devir, baslangic, toplam, sayacDelta, devirDelta]
     );
 
     await client.query("COMMIT");
@@ -115,9 +117,10 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  const limitRaw = Number(params.get("limit"));
-  const limit =
-    Number.isFinite(limitRaw) && limitRaw > 0 ? Math.min(limitRaw, 1000) : 100;
+  // limit parametresi verilmezse sınır uygulanmaz (tüm kayıtlar döner).
+  const limitParam = params.get("limit");
+  const limitRaw = Number(limitParam);
+  const hasLimit = limitParam !== null && Number.isFinite(limitRaw) && limitRaw > 0;
 
   const from = params.get("from");
   const to = params.get("to");
@@ -134,17 +137,20 @@ export async function GET(request: NextRequest) {
     where += ` AND timestamp_unix <= $${values.length}`;
   }
 
-  values.push(limit);
-  const limitPlaceholder = `$${values.length}`;
+  let limitClause = "";
+  if (hasLimit) {
+    values.push(Math.min(limitRaw, 10000));
+    limitClause = `LIMIT $${values.length}`;
+  }
 
   try {
     const result = await pool.query<MeterReading>(
       `SELECT id, device_id, timestamp_unix, recorded_at,
-              sayac, devir, baslangic, sayac_delta, devir_delta
+              sayac, devir, baslangic, toplam, sayac_delta, devir_delta
        FROM meter_readings
        WHERE ${where}
        ORDER BY timestamp_unix DESC
-       LIMIT ${limitPlaceholder}`,
+       ${limitClause}`,
       values
     );
 

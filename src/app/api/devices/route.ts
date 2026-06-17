@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
 import type { DeviceWithStats } from "@/types";
 
@@ -25,5 +25,41 @@ export async function GET() {
       { success: false, error: "Sunucu hatası" },
       { status: 500 }
     );
+  }
+}
+
+// DELETE /api/devices?device_id=... — cihazı ve tüm okumalarını siler.
+export async function DELETE(request: NextRequest) {
+  const deviceId = request.nextUrl.searchParams.get("device_id");
+
+  if (!deviceId) {
+    return NextResponse.json(
+      { success: false, error: "device_id zorunlu" },
+      { status: 400 }
+    );
+  }
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    // FK kısıtı nedeniyle önce okumalar, sonra cihaz silinir.
+    await client.query("DELETE FROM meter_readings WHERE device_id = $1", [
+      deviceId,
+    ]);
+    const result = await client.query(
+      "DELETE FROM devices WHERE device_id = $1",
+      [deviceId]
+    );
+    await client.query("COMMIT");
+    return NextResponse.json({ success: true, deleted: result.rowCount });
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("DELETE /api/devices hata:", err);
+    return NextResponse.json(
+      { success: false, error: "Sunucu hatası" },
+      { status: 500 }
+    );
+  } finally {
+    client.release();
   }
 }
