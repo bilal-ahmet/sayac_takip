@@ -38,6 +38,14 @@ export interface MeterReading {
   devir_delta: number | null;
 }
 
+// Ardışık iki okuma arasındaki, timeout'u aşan zaman boşluğu (kopma).
+export interface Gap {
+  toId: number; // boşluktan SONRA gelen (daha yeni) okumanın id'si
+  fromTs: number; // önceki (eski) okumanın unix'i
+  toTs: number; // sonraki (yeni) okumanın unix'i
+  gapSeconds: number; // aradaki saniye farkı
+}
+
 // POST /api/readings başarılı yanıtı
 export interface ReadingResult {
   success: boolean;

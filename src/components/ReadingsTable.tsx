@@ -9,9 +9,10 @@ const PAGE_SIZE = 20;
 
 interface Props {
   readings: MeterReading[];
+  gapToIds?: Set<number>;
 }
 
-export default function ReadingsTable({ readings }: Props) {
+export default function ReadingsTable({ readings, gapToIds }: Props) {
   const [page, setPage] = useState(1);
 
   // Yeni veri gelince (cihaz değişimi veya auto-refresh) ilk sayfaya dön.
@@ -55,13 +56,22 @@ export default function ReadingsTable({ readings }: Props) {
                 </td>
               </tr>
             )}
-            {slice.map((r) => (
+            {slice.map((r) => {
+              const isGap = gapToIds?.has(r.id) ?? false;
+              return (
               <tr
                 key={r.id}
                 className="text-zinc-800 dark:text-zinc-200 hover:bg-zinc-50 dark:hover:bg-zinc-800/50"
               >
                 <td className="whitespace-nowrap px-4 py-2">
-                  {formatTimestamp(r.timestamp_unix)}
+                  {isGap && (
+                    <span className="mr-1.5 rounded bg-red-100 px-1.5 py-0.5 text-[10px] font-semibold text-red-700 dark:bg-red-950 dark:text-red-300">
+                      ⚠ kopma
+                    </span>
+                  )}
+                  <span className={isGap ? "font-medium text-red-600 dark:text-red-400" : ""}>
+                    {formatTimestamp(r.timestamp_unix)}
+                  </span>
                 </td>
                 <td className="px-4 py-2 text-right tabular-nums">{r.sayac}</td>
                 <td
@@ -79,7 +89,8 @@ export default function ReadingsTable({ readings }: Props) {
                   {r.baslangic}
                 </td>
               </tr>
-            ))}
+              );
+            })}
           </tbody>
         </table>
       </div>
