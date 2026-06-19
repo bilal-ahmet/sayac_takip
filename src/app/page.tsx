@@ -22,6 +22,9 @@ export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [readings, setReadings] = useState<MeterReading[]>([]);
+  // Stat kartları için gerçek son okuma. Yalnızca canlı yüklemede güncellenir;
+  // filtre modunda korunur (filtrelenmiş sonuçların en yenisi değil).
+  const [latest, setLatest] = useState<MeterReading | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [lastRefresh, setLastRefresh] = useState<Date | null>(null);
   // "Verileri Sıfırla" onay adımı: null → onay beklenmiyor, string → onay bekleniyor
@@ -35,6 +38,9 @@ export default function Home() {
   const [deltaThreshold, setDeltaThreshold] = useState(0);
   const [timeoutSec, setTimeoutSec] = useState(0);
   const [onlyGaps, setOnlyGaps] = useState(false);
+
+  // Filtre aktif mi? Aktifse: sunucu tüm geçmişi tarar + otomatik yenileme durur.
+  const filterActive = deltaThreshold > 0 || (onlyGaps && timeoutSec > 0);
 
   // Cihaz listesini çek.
   const loadDevices = useCallback(async () => {
@@ -52,21 +58,48 @@ export default function Home() {
     }
   }, []);
 
-  // Seçili cihazın okumalarını çek.
-  const loadReadings = useCallback(async (deviceId: string) => {
+  // Canlı mod: son 200 okumayı çek (filtre yokken, 5 sn'de bir).
+  const loadLive = useCallback(async (deviceId: string) => {
     try {
       const res = await fetch(
-        `/api/readings?device_id=${encodeURIComponent(deviceId)}`
+        `/api/readings?device_id=${encodeURIComponent(deviceId)}&limit=200`
       );
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
       setReadings(json.readings);
+      setLatest(json.readings[0] ?? null);
       setError(null);
       setLastRefresh(new Date());
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
     }
   }, []);
+
+  // Filtre modu: sunucuda tüm geçmişi tara, sadece eşleşenleri çek (poll yok).
+  const loadFiltered = useCallback(
+    async (deviceId: string) => {
+      try {
+        const qs = new URLSearchParams({ device_id: deviceId });
+        if (deltaThreshold > 0) {
+          qs.set("delta_col", deltaCol);
+          qs.set("delta_threshold", String(deltaThreshold));
+        }
+        if (onlyGaps && timeoutSec > 0) {
+          qs.set("only_gaps", "1");
+          qs.set("timeout_sec", String(timeoutSec));
+        }
+        const res = await fetch(`/api/readings?${qs.toString()}`);
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
+        setReadings(json.readings);
+        setError(null);
+        setLastRefresh(new Date());
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+      }
+    },
+    [deltaCol, deltaThreshold, onlyGaps, timeoutSec]
+  );
 
   // İlk yükleme: cihazları çek. setState'ler fetch await'inden SONRA çalışır
   // (senkron değil), bu yüzden set-state-in-effect uyarısı burada geçerli değil.
@@ -75,17 +108,23 @@ export default function Home() {
     loadDevices();
   }, [loadDevices]);
 
-  // Seçili cihaz değişince + her 30 sn'de bir okumaları ve cihazları yenile.
+  // Seçili cihaz/filtre değişince yükle.
+  //  - Filtre aktif: bir kez filtreli sorgu, otomatik yenileme YOK.
+  //  - Filtre yok: canlı yükle + her 5 sn'de bir okuma ve cihazları yenile.
   useEffect(() => {
     if (!selected) return;
-    // eslint-disable-next-line react-hooks/set-state-in-effect
-    loadReadings(selected);
+    if (filterActive) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      loadFiltered(selected);
+      return;
+    }
+    loadLive(selected);
     const id = setInterval(() => {
-      loadReadings(selected);
+      loadLive(selected);
       loadDevices();
     }, REFRESH_MS);
     return () => clearInterval(id);
-  }, [selected, loadReadings, loadDevices]);
+  }, [selected, filterActive, loadLive, loadFiltered, loadDevices]);
 
   // Seçili cihazın tüm okumalarını sil.
   async function handleReset() {
@@ -100,6 +139,7 @@ export default function Home() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Silinemedi");
       setReadings([]);
+      setLatest(null);
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
@@ -121,6 +161,7 @@ export default function Home() {
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Cihaz silinemedi");
       setReadings([]);
+      setLatest(null);
       setSelected(null); // loadDevices ardından yeni ilk cihazı seçer
       setError(null);
       await loadDevices();
@@ -131,10 +172,7 @@ export default function Home() {
     }
   }
 
-  // Özet istatistikler (okumalar DESC; ilk eleman en yeni).
-  const latest = readings[0];
-
-  // Kopma tespiti (timeout aşan ardışık boşluklar).
+  // Kopma tespiti (sunucudan gelen gap_sec'e göre, timeout aşanlar).
   const gaps = useMemo(
     () => computeGaps(readings, timeoutSec),
     [readings, timeoutSec]
@@ -144,25 +182,22 @@ export default function Home() {
     [gaps]
   );
 
-  // Filtrelenmiş okumalar: önce delta eşiği, sonra "sadece kopmalar".
-  const filteredReadings = useMemo(() => {
-    let list = readings;
-    if (deltaThreshold > 0) {
-      list = list.filter((r) => {
-        const d = deltaCol === "sayac" ? r.sayac_delta : r.devir_delta;
-        return d != null && Math.abs(d) > deltaThreshold;
-      });
-    }
-    if (onlyGaps && timeoutSec > 0) {
-      list = list.filter((r) => gapToIds.has(r.id));
-    }
-    return list;
-  }, [readings, deltaThreshold, deltaCol, onlyGaps, timeoutSec, gapToIds]);
+  // Seçili cihazın toplam okuma sayısı (filtre öncesi referans).
+  const totalCount =
+    devices.find((d) => d.device_id === selected)?.reading_count ??
+    readings.length;
 
-  // Filtrelenmiş sonuçları CSV olarak indir.
+  // Filtreleri temizle → filterActive false olur → effect canlı poll'ü sürdürür.
+  function clearFilters() {
+    setDeltaThreshold(0);
+    setTimeoutSec(0);
+    setOnlyGaps(false);
+  }
+
+  // Gösterilen okumaları CSV olarak indir.
   function handleExportCSV() {
     const name = `okumalar-${selected ?? "cihaz"}.csv`;
-    downloadCSV(name, readingsToCSV(filteredReadings));
+    downloadCSV(name, readingsToCSV(readings));
   }
 
   return (
@@ -173,7 +208,9 @@ export default function Home() {
             Sayaç Takip
           </h1>
           <p className="text-sm text-zinc-500">
-            {lastRefresh
+            {filterActive
+              ? "Filtre aktif · otomatik yenileme duraklatıldı"
+              : lastRefresh
               ? `Son yenileme: ${lastRefresh.toLocaleTimeString(
                   "tr-TR"
                 )} · 5 sn'de bir otomatik`
@@ -188,10 +225,7 @@ export default function Home() {
               setSelected(id);
               setConfirmReset(null);
               setConfirmDeleteDevice(null);
-              // Filtreleri sıfırla
-              setDeltaThreshold(0);
-              setTimeoutSec(0);
-              setOnlyGaps(false);
+              clearFilters();
             }}
           />
           {/* Sıfırlama butonu — iki adımlı onay */}
@@ -293,15 +327,17 @@ export default function Home() {
             deltaThreshold={deltaThreshold}
             timeoutSec={timeoutSec}
             onlyGaps={onlyGaps}
-            shownCount={filteredReadings.length}
-            totalCount={readings.length}
+            shownCount={readings.length}
+            totalCount={totalCount}
+            filterActive={filterActive}
             onDeltaColChange={setDeltaCol}
             onDeltaThresholdChange={setDeltaThreshold}
             onTimeoutChange={setTimeoutSec}
             onOnlyGapsChange={setOnlyGaps}
+            onClear={clearFilters}
             onExport={handleExportCSV}
           />
-          <ReadingsTable readings={filteredReadings} gapToIds={gapToIds} />
+          <ReadingsTable readings={readings} gapToIds={gapToIds} />
         </div>
         <div className="flex flex-col gap-6 lg:col-span-1">
           <TimelineView readings={readings} />

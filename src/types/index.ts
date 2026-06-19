@@ -36,6 +36,9 @@ export interface MeterReading {
   toplam: number | null;
   sayac_delta: number | null;
   devir_delta: number | null;
+  // Bir önceki (kronolojik) okumaya göre saniye farkı. Sunucuda LAG ile hesaplanır.
+  // En eski satırda (öncesi yok) null gelir. Kopma tespitinde kullanılır.
+  gap_sec?: number | null;
 }
 
 // Ardışık iki okuma arasındaki, timeout'u aşan zaman boşluğu (kopma).

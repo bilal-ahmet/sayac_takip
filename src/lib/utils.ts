@@ -40,24 +40,22 @@ export function formatDuration(seconds: number): string {
   return parts.length > 0 ? parts.join(" ") : "0 sn";
 }
 
-// Ardışık okumalar arası, timeoutSec'i aşan boşlukları bul.
-// readings DESC (en yeni ilk) gelir; kronolojik ardışık çiftleri kıyaslar.
+// timeoutSec'i aşan boşlukları bul. Boşluk bilgisi sunucudan gelen gap_sec
+// alanından okunur (LAG ile hesaplanır): gap_sec = bu okumanın bir önceki
+// kronolojik okumaya saniye uzaklığı. En eski satırda gap_sec null'dur.
 export function computeGaps(
   readings: MeterReading[],
   timeoutSec: number
 ): Gap[] {
   if (!timeoutSec || timeoutSec <= 0) return [];
   const gaps: Gap[] = [];
-  // r[i] daha yeni, r[i+1] daha eski (DESC). Boşluk = yeni - eski.
-  for (let i = 0; i < readings.length - 1; i++) {
-    const newer = readings[i];
-    const older = readings[i + 1];
-    const gapSeconds = newer.timestamp_unix - older.timestamp_unix;
-    if (gapSeconds > timeoutSec) {
+  for (const r of readings) {
+    const gapSeconds = r.gap_sec;
+    if (gapSeconds != null && gapSeconds > timeoutSec) {
       gaps.push({
-        toId: newer.id,
-        fromTs: older.timestamp_unix,
-        toTs: newer.timestamp_unix,
+        toId: r.id,
+        fromTs: r.timestamp_unix - gapSeconds,
+        toTs: r.timestamp_unix,
         gapSeconds,
       });
     }

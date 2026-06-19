@@ -9,10 +9,12 @@ interface Props {
   onlyGaps: boolean;
   shownCount: number;
   totalCount: number;
+  filterActive: boolean;
   onDeltaColChange: (v: DeltaCol) => void;
   onDeltaThresholdChange: (v: number) => void;
   onTimeoutChange: (v: number) => void;
   onOnlyGapsChange: (v: boolean) => void;
+  onClear: () => void;
   onExport: () => void;
 }
 
@@ -26,10 +28,12 @@ export default function ReadingsFilters({
   onlyGaps,
   shownCount,
   totalCount,
+  filterActive,
   onDeltaColChange,
   onDeltaThresholdChange,
   onTimeoutChange,
   onOnlyGapsChange,
+  onClear,
   onExport,
 }: Props) {
   return (
@@ -84,9 +88,22 @@ export default function ReadingsFilters({
       </label>
 
       <div className="ml-auto flex items-center gap-3">
+        {filterActive && (
+          <span className="rounded bg-amber-100 px-2 py-0.5 text-[11px] font-medium text-amber-700 dark:bg-amber-950 dark:text-amber-300">
+            Filtre aktif · yenileme duraklatıldı
+          </span>
+        )}
         <span className="text-xs text-zinc-400">
           {shownCount} / {totalCount} kayıt
         </span>
+        {filterActive && (
+          <button
+            onClick={onClear}
+            className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
+          >
+            Filtreleri temizle
+          </button>
+        )}
         <button
           onClick={onExport}
           disabled={shownCount === 0}

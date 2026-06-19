@@ -105,7 +105,18 @@ export async function POST(request: NextRequest) {
   }
 }
 
-// GET /api/readings?device_id=...&limit=100&from=...&to=...
+// Filtre modunda taranan satır sayısı için üst sınır (egress güvenlik tavanı).
+const FILTER_CAP = 10000;
+// Canlı modda (filtre yokken) varsayılan satır limiti.
+const DEFAULT_LIMIT = 200;
+
+// GET /api/readings?device_id=...&limit=200&from=...&to=...
+//   &delta_col=sayac|devir&delta_threshold=N&only_gaps=1&timeout_sec=N
+//
+// İki mod vardır:
+//  - Canlı mod (filtre yok): son N satır + her satır için pencere-içi gap_sec.
+//  - Filtre modu (delta_threshold>0 veya only_gaps): TÜM geçmiş LAG ile taranır,
+//    sadece eşleşen satırlar döner (en fazla FILTER_CAP). Egress bu sayede düşük kalır.
 export async function GET(request: NextRequest) {
   const params = request.nextUrl.searchParams;
   const deviceId = params.get("device_id");
@@ -117,17 +128,19 @@ export async function GET(request: NextRequest) {
     );
   }
 
-  // limit parametresi verilmezse sınır uygulanmaz (tüm kayıtlar döner).
-  const limitParam = params.get("limit");
-  const limitRaw = Number(limitParam);
-  const hasLimit = limitParam !== null && Number.isFinite(limitRaw) && limitRaw > 0;
-
   const from = params.get("from");
   const to = params.get("to");
+  // delta_col yalnızca iki sabit kolona izin verir (SQL'e gömülür, injection yok).
+  const deltaCol = params.get("delta_col") === "devir" ? "devir_delta" : "sayac_delta";
+  const deltaThreshold = Number(params.get("delta_threshold")) || 0;
+  const timeoutSec = Number(params.get("timeout_sec")) || 0;
+  const onlyGaps = params.get("only_gaps") === "1";
 
+  const filterActive = deltaThreshold > 0 || (onlyGaps && timeoutSec > 0);
+
+  // device_id + opsiyonel tarih aralığı: her iki modda ortak WHERE.
   const values: (string | number)[] = [deviceId];
   let where = "device_id = $1";
-
   if (from) {
     values.push(Number(from));
     where += ` AND timestamp_unix >= $${values.length}`;
@@ -137,23 +150,60 @@ export async function GET(request: NextRequest) {
     where += ` AND timestamp_unix <= $${values.length}`;
   }
 
-  let limitClause = "";
-  if (hasLimit) {
-    values.push(Math.min(limitRaw, 10000));
-    limitClause = `LIMIT $${values.length}`;
+  let sql: string;
+
+  if (!filterActive) {
+    // Canlı mod: son N satırı al, gap_sec'i bu pencere içinde LAG ile hesapla.
+    // Tüm tabloyu taramaz; yalnızca en yeni N satırı indeksle çeker.
+    const limitParam = params.get("limit");
+    const limitRaw = Number(limitParam);
+    const limit =
+      limitParam !== null && Number.isFinite(limitRaw) && limitRaw > 0
+        ? Math.min(limitRaw, FILTER_CAP)
+        : DEFAULT_LIMIT;
+    values.push(limit);
+    sql = `
+      SELECT w.*,
+             timestamp_unix - LAG(timestamp_unix)
+               OVER (ORDER BY timestamp_unix ASC) AS gap_sec
+      FROM (
+        SELECT id, device_id, timestamp_unix, recorded_at,
+               sayac, devir, baslangic, toplam, sayac_delta, devir_delta
+        FROM meter_readings
+        WHERE ${where}
+        ORDER BY timestamp_unix DESC
+        LIMIT $${values.length}
+      ) w
+      ORDER BY timestamp_unix DESC`;
+  } else {
+    // Filtre modu: TÜM geçmişi LAG ile tara, filtreleri uygula, eşleşenleri döndür.
+    const conds: string[] = [];
+    if (deltaThreshold > 0) {
+      values.push(deltaThreshold);
+      conds.push(`ABS(${deltaCol}) > $${values.length}`);
+    }
+    if (onlyGaps && timeoutSec > 0) {
+      values.push(timeoutSec);
+      conds.push(`gap_sec > $${values.length}`);
+    }
+    const filterWhere = conds.length > 0 ? `WHERE ${conds.join(" AND ")}` : "";
+    sql = `
+      WITH ordered AS (
+        SELECT id, device_id, timestamp_unix, recorded_at,
+               sayac, devir, baslangic, toplam, sayac_delta, devir_delta,
+               timestamp_unix - LAG(timestamp_unix)
+                 OVER (ORDER BY timestamp_unix ASC) AS gap_sec
+        FROM meter_readings
+        WHERE ${where}
+      )
+      SELECT * FROM ordered
+      ${filterWhere}
+      ORDER BY timestamp_unix DESC
+      LIMIT ${FILTER_CAP}`;
   }
 
   try {
-    const result = await pool.query<MeterReading>(
-      `SELECT id, device_id, timestamp_unix, recorded_at,
-              sayac, devir, baslangic, toplam, sayac_delta, devir_delta
-       FROM meter_readings
-       WHERE ${where}
-       ORDER BY timestamp_unix DESC
-       ${limitClause}`,
-      values
-    );
-
+    const result = await pool.query<MeterReading>(sql, values);
     return NextResponse.json({ success: true, readings: result.rows });
   } catch (err) {
     console.error("GET /api/readings hata:", err);
