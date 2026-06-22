@@ -16,6 +16,7 @@ interface Props {
   onOnlyGapsChange: (v: boolean) => void;
   onClear: () => void;
   onExport: () => void;
+  exporting?: boolean;
 }
 
 const inputCls =
@@ -35,6 +36,7 @@ export default function ReadingsFilters({
   onOnlyGapsChange,
   onClear,
   onExport,
+  exporting = false,
 }: Props) {
   return (
     <div className="flex flex-wrap items-end gap-4 rounded-xl border border-zinc-200 bg-white p-4 shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -106,10 +108,10 @@ export default function ReadingsFilters({
         )}
         <button
           onClick={onExport}
-          disabled={shownCount === 0}
+          disabled={shownCount === 0 || exporting}
           className="rounded-lg border border-zinc-300 bg-white px-3 py-1.5 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 disabled:cursor-not-allowed disabled:opacity-40 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300 dark:hover:bg-zinc-800"
         >
-          CSV indir
+          {exporting ? "İndiriliyor…" : "CSV indir"}
         </button>
       </div>
     </div>

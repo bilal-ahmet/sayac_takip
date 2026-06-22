@@ -33,6 +33,8 @@ export default function Home() {
   // "Cihazı Sil" onay adımı
   const [confirmDeleteDevice, setConfirmDeleteDevice] = useState<string | null>(null);
   const [deletingDevice, setDeletingDevice] = useState(false);
+  // CSV dışa aktarım durumu
+  const [exporting, setExporting] = useState(false);
   // Okumalar filtre/analiz state'leri
   const [deltaCol, setDeltaCol] = useState<DeltaCol>("sayac");
   const [deltaThreshold, setDeltaThreshold] = useState(0);
@@ -194,10 +196,30 @@ export default function Home() {
     setOnlyGaps(false);
   }
 
-  // Gösterilen okumaları CSV olarak indir.
-  function handleExportCSV() {
-    const name = `okumalar-${selected ?? "cihaz"}.csv`;
-    downloadCSV(name, readingsToCSV(readings));
+  // CSV olarak indir. Canlı modda ekrandaki `readings` son 200 ile sınırlı,
+  // bu yüzden all=1 ile TÜM geçmişi çekeriz. Filtre modunda `readings` zaten
+  // tüm eşleşen kayıtları içerir (200 sınırı yok), olduğu gibi kullanılır.
+  async function handleExportCSV() {
+    if (!selected) return;
+    setExporting(true);
+    try {
+      let rows = readings;
+      if (!filterActive) {
+        const res = await fetch(
+          `/api/readings?device_id=${encodeURIComponent(selected)}&all=1`
+        );
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error ?? "Dışa aktarılamadı");
+        rows = json.readings;
+      }
+      if (rows.length === 0) return;
+      downloadCSV(`okumalar-${selected}.csv`, readingsToCSV(rows));
+      setError(null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+    } finally {
+      setExporting(false);
+    }
   }
 
   return (
@@ -336,6 +358,7 @@ export default function Home() {
             onOnlyGapsChange={setOnlyGaps}
             onClear={clearFilters}
             onExport={handleExportCSV}
+            exporting={exporting}
           />
           <ReadingsTable readings={readings} gapToIds={gapToIds} />
         </div>

@@ -155,13 +155,19 @@ export async function GET(request: NextRequest) {
   if (!filterActive) {
     // Canlı mod: son N satırı al, gap_sec'i bu pencere içinde LAG ile hesapla.
     // Tüm tabloyu taramaz; yalnızca en yeni N satırı indeksle çeker.
-    const limitParam = params.get("limit");
-    const limitRaw = Number(limitParam);
-    const limit =
-      limitParam !== null && Number.isFinite(limitRaw) && limitRaw > 0
-        ? Math.min(limitRaw, FILTER_CAP)
-        : DEFAULT_LIMIT;
-    values.push(limit);
+    //   all=1 → CSV dışa aktarımı için tüm geçmiş döner (LIMIT yok).
+    const all = params.get("all") === "1";
+    let innerLimit = "";
+    if (!all) {
+      const limitParam = params.get("limit");
+      const limitRaw = Number(limitParam);
+      const limit =
+        limitParam !== null && Number.isFinite(limitRaw) && limitRaw > 0
+          ? Math.min(limitRaw, FILTER_CAP)
+          : DEFAULT_LIMIT;
+      values.push(limit);
+      innerLimit = `LIMIT $${values.length}`;
+    }
     sql = `
       SELECT w.*,
              timestamp_unix - LAG(timestamp_unix)
@@ -172,7 +178,7 @@ export async function GET(request: NextRequest) {
         FROM meter_readings
         WHERE ${where}
         ORDER BY timestamp_unix DESC
-        LIMIT $${values.length}
+        ${innerLimit}
       ) w
       ORDER BY timestamp_unix DESC`;
   } else {
