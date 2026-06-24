@@ -323,6 +323,9 @@ export default function Home() {
         <StatsCard
           label="Son Okuma Zamanı"
           value={latest ? formatTimestamp(latest.timestamp_unix) : "—"}
+          subtitle={
+            latest?.time_synced === false ? "⚠ sunucu saati" : undefined
+          }
         />
         <StatsCard
           label="Sayaç Değeri"

@@ -32,6 +32,13 @@ export async function POST(request: NextRequest) {
   // toplam opsiyonel: sayı değilse null kaydedilir.
   const toplam = typeof body.toplam === "number" ? body.toplam : null;
 
+  // Cihaz saati senkron mu? time_synced=0 veya timestamp geçersiz/0 ise değil.
+  // Senkron değilse timestamp_unix'i sunucu kendi saatiyle ikame eder; böylece
+  // sıralama/delta/grafik mantığı 1970'e düşen bir kayıtla bozulmaz.
+  const synced =
+    body.time_synced !== 0 && typeof timestamp === "number" && timestamp > 0;
+  const effectiveTs = synced ? timestamp : Math.floor(Date.now() / 1000);
+
   if (
     !deviceId ||
     typeof timestamp !== "number" ||
@@ -65,7 +72,7 @@ export async function POST(request: NextRequest) {
       `SELECT sayac, devir
        FROM meter_readings
        WHERE device_id = $1
-       ORDER BY timestamp_unix DESC
+       ORDER BY timestamp_unix DESC, id DESC
        LIMIT 1`,
       [deviceId]
     );
@@ -79,10 +86,10 @@ export async function POST(request: NextRequest) {
     // 4) Okumayı kaydet.
     const inserted = await client.query<MeterReading>(
       `INSERT INTO meter_readings
-         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, sayac_delta, devir_delta)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, sayac_delta, devir_delta, time_synced)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
        RETURNING id`,
-      [deviceId, timestamp, sayac, devir, baslangic, toplam, sayacDelta, devirDelta]
+      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, sayacDelta, devirDelta, synced]
     );
 
     await client.query("COMMIT");
@@ -171,16 +178,16 @@ export async function GET(request: NextRequest) {
     sql = `
       SELECT w.*,
              timestamp_unix - LAG(timestamp_unix)
-               OVER (ORDER BY timestamp_unix ASC) AS gap_sec
+               OVER (ORDER BY timestamp_unix ASC, id ASC) AS gap_sec
       FROM (
         SELECT id, device_id, timestamp_unix, recorded_at,
-               sayac, devir, baslangic, toplam, sayac_delta, devir_delta
+               sayac, devir, baslangic, toplam, sayac_delta, devir_delta, time_synced
         FROM meter_readings
         WHERE ${where}
-        ORDER BY timestamp_unix DESC
+        ORDER BY timestamp_unix DESC, id DESC
         ${innerLimit}
       ) w
-      ORDER BY timestamp_unix DESC`;
+      ORDER BY timestamp_unix DESC, id DESC`;
   } else {
     // Filtre modu: TÜM geçmişi LAG ile tara, filtreleri uygula, eşleşenleri döndür.
     const conds: string[] = [];
@@ -196,15 +203,15 @@ export async function GET(request: NextRequest) {
     sql = `
       WITH ordered AS (
         SELECT id, device_id, timestamp_unix, recorded_at,
-               sayac, devir, baslangic, toplam, sayac_delta, devir_delta,
+               sayac, devir, baslangic, toplam, sayac_delta, devir_delta, time_synced,
                timestamp_unix - LAG(timestamp_unix)
-                 OVER (ORDER BY timestamp_unix ASC) AS gap_sec
+                 OVER (ORDER BY timestamp_unix ASC, id ASC) AS gap_sec
         FROM meter_readings
         WHERE ${where}
       )
       SELECT * FROM ordered
       ${filterWhere}
-      ORDER BY timestamp_unix DESC
+      ORDER BY timestamp_unix DESC, id DESC
       LIMIT ${FILTER_CAP}`;
   }
 

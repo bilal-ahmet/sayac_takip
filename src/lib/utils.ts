@@ -74,6 +74,7 @@ export function readingsToCSV(readings: MeterReading[]): string {
     "toplam",
     "sayac_delta",
     "devir_delta",
+    "time_synced",
   ];
   const escape = (v: string | number | null): string => {
     const s = v == null ? "" : String(v);
@@ -90,6 +91,7 @@ export function readingsToCSV(readings: MeterReading[]): string {
       r.toplam,
       r.sayac_delta,
       r.devir_delta,
+      r.time_synced === false ? 0 : 1,
     ]
       .map(escape)
       .join(",")

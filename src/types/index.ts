@@ -8,6 +8,7 @@ export interface IncomingReading {
   devir: number;
   baslangic: number;
   toplam?: number; // cihazın hesapladığı toplam (opsiyonel)
+  time_synced?: number; // cihaz saati NTP ile çekebildi mi? 1=evet, 0=hayır
 }
 
 // devices tablosu satırı
@@ -36,6 +37,9 @@ export interface MeterReading {
   toplam: number | null;
   sayac_delta: number | null;
   devir_delta: number | null;
+  // Cihaz saati senkron muydu? false ise timestamp_unix sunucu saatiyle ikame
+  // edilmiştir (cihaz timestamp=0 gönderdi). Dashboard'da rozetle işaretlenir.
+  time_synced: boolean;
   // Bir önceki (kronolojik) okumaya göre saniye farkı. Sunucuda LAG ile hesaplanır.
   // En eski satırda (öncesi yok) null gelir. Kopma tespitinde kullanılır.
   gap_sec?: number | null;

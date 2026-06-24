@@ -69,6 +69,14 @@ export default function ReadingsTable({ readings, gapToIds }: Props) {
                       ⚠ kopma
                     </span>
                   )}
+                  {r.time_synced === false && (
+                    <span
+                      title="Cihaz saati senkron değildi; sunucu saati kullanıldı"
+                      className="mr-1.5 rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-semibold text-amber-700 dark:bg-amber-950 dark:text-amber-300"
+                    >
+                      ⚠ saat yok
+                    </span>
+                  )}
                   <span className={isGap ? "font-medium text-red-600 dark:text-red-400" : ""}>
                     {formatTimestamp(r.timestamp_unix)}
                   </span>
