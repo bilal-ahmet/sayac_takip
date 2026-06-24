@@ -76,10 +76,12 @@ export function readingsToCSV(readings: MeterReading[]): string {
     "devir_delta",
     "time_synced",
   ];
+  // Türkçe yerel ayarlı Excel sütun ayırıcı olarak noktalı virgül bekler.
+  const SEP = ";";
   const escape = (v: string | number | null): string => {
     const s = v == null ? "" : String(v);
-    // Virgül, çift tırnak veya yeni satır içeriyorsa tırnakla.
-    return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+    // Ayırıcı, çift tırnak veya yeni satır içeriyorsa tırnakla.
+    return /[";\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
   };
   const lines = readings.map((r) =>
     [
@@ -94,9 +96,10 @@ export function readingsToCSV(readings: MeterReading[]): string {
       r.time_synced === false ? 0 : 1,
     ]
       .map(escape)
-      .join(",")
+      .join(SEP)
   );
-  return [headers.join(","), ...lines].join("\n");
+  // "sep=;" satırı, Excel'in ayırıcıyı otomatik tanımasını sağlar.
+  return [`sep=${SEP}`, headers.join(SEP), ...lines].join("\n");
 }
 
 // CSV string'i tarayıcıda indir. Excel'de Türkçe için UTF-8 BOM eklenir.
