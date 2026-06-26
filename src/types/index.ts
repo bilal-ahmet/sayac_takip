@@ -3,12 +3,13 @@
 export interface IncomingReading {
   "Device Id"?: string;
   device_id?: string;
+  fw_version?: string; // cihaz firmware sürümü (cihaz başına sabit, okuma başına değil)
   timestamp: number; // unix saniye
   sayac: number;
   devir: number;
   baslangic: number;
   toplam?: number; // cihazın hesapladığı toplam (opsiyonel)
-  time_synced?: number; // cihaz saati NTP ile çekebildi mi? 1=evet, 0=hayır
+  time_synced?: number | boolean; // cihaz saati NTP ile çekebildi mi? 1/true=evet, 0/false=hayır
 }
 
 // devices tablosu satırı
@@ -16,6 +17,7 @@ export interface Device {
   id: number;
   device_id: string;
   name: string | null;
+  fw_version: string | null; // en son POST'ta bildirilen firmware sürümü
   created_at: string; // ISO timestamptz
 }
 

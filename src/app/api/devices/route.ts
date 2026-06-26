@@ -9,12 +9,13 @@ export async function GET() {
       `SELECT d.id,
               d.device_id,
               d.name,
+              d.fw_version,
               d.created_at,
               MAX(mr.timestamp_unix)        AS last_timestamp_unix,
               COUNT(mr.id)::int             AS reading_count
        FROM devices d
        LEFT JOIN meter_readings mr ON mr.device_id = d.device_id
-       GROUP BY d.id, d.device_id, d.name, d.created_at
+       GROUP BY d.id, d.device_id, d.name, d.fw_version, d.created_at
        ORDER BY last_timestamp_unix DESC NULLS LAST, d.created_at DESC`
     );
 

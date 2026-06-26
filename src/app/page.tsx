@@ -184,10 +184,9 @@ export default function Home() {
     [gaps]
   );
 
-  // Seçili cihazın toplam okuma sayısı (filtre öncesi referans).
-  const totalCount =
-    devices.find((d) => d.device_id === selected)?.reading_count ??
-    readings.length;
+  // Seçili cihaz (toplam okuma sayısı ve firmware sürümü için).
+  const selectedDevice = devices.find((d) => d.device_id === selected);
+  const totalCount = selectedDevice?.reading_count ?? readings.length;
 
   // Filtreleri temizle → filterActive false olur → effect canlı poll'ü sürdürür.
   function clearFilters() {
@@ -226,9 +225,17 @@ export default function Home() {
     <div className="mx-auto w-full max-w-6xl flex-1 px-4 py-8 sm:px-6">
       <header className="mb-6 flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
         <div>
-          <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
-            Sayaç Takip
-          </h1>
+          <div className="flex items-center gap-2">
+            <h1 className="text-2xl font-bold text-zinc-900 dark:text-zinc-50">
+              Sayaç Takip
+            </h1>
+            {/* Firmware sürümü: cihaz başına tek sabit gösterim (okuma tablosunda değil). */}
+            {selectedDevice?.fw_version && (
+              <span className="rounded-full bg-zinc-100 px-2.5 py-0.5 font-mono text-xs font-medium text-zinc-600 dark:bg-zinc-800 dark:text-zinc-300">
+                fw {selectedDevice.fw_version}
+              </span>
+            )}
+          </div>
           <p className="text-sm text-zinc-500">
             {filterActive
               ? "Filtre aktif · otomatik yenileme duraklatıldı"

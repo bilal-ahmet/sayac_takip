@@ -31,12 +31,21 @@ export async function POST(request: NextRequest) {
   const { timestamp, sayac, devir, baslangic } = body;
   // toplam opsiyonel: sayı değilse null kaydedilir.
   const toplam = typeof body.toplam === "number" ? body.toplam : null;
+  // fw_version cihaz başına sabit bilgidir; okuma satırına değil devices'a yazılır.
+  const fwVersion =
+    typeof body.fw_version === "string" && body.fw_version.trim() !== ""
+      ? body.fw_version.trim()
+      : null;
 
-  // Cihaz saati senkron mu? time_synced=0 veya timestamp geçersiz/0 ise değil.
-  // Senkron değilse timestamp_unix'i sunucu kendi saatiyle ikame eder; böylece
-  // sıralama/delta/grafik mantığı 1970'e düşen bir kayıtla bozulmaz.
+  // Cihaz saati senkron mu? time_synced 0/false veya timestamp geçersiz/0 ise değil.
+  // Cihaz bu alanı integer (1/0) ya da boolean (true/false) gönderebilir; ikisi de
+  // desteklenir. Senkron değilse timestamp_unix'i sunucu kendi saatiyle ikame eder;
+  // böylece sıralama/delta/grafik mantığı 1970'e düşen bir kayıtla bozulmaz.
   const synced =
-    body.time_synced !== 0 && typeof timestamp === "number" && timestamp > 0;
+    body.time_synced !== 0 &&
+    body.time_synced !== false &&
+    typeof timestamp === "number" &&
+    timestamp > 0;
   const effectiveTs = synced ? timestamp : Math.floor(Date.now() / 1000);
 
   if (
@@ -60,11 +69,13 @@ export async function POST(request: NextRequest) {
   try {
     await client.query("BEGIN");
 
-    // 1) Cihaz yoksa ekle (idempotent).
+    // 1) Cihaz yoksa ekle; varsa firmware sürümünü güncelle (en son bildirilen).
+    //    fw_version null gelirse mevcut değer korunur (COALESCE).
     await client.query(
-      `INSERT INTO devices (device_id) VALUES ($1)
-       ON CONFLICT (device_id) DO NOTHING`,
-      [deviceId]
+      `INSERT INTO devices (device_id, fw_version) VALUES ($1, $2)
+       ON CONFLICT (device_id)
+       DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)`,
+      [deviceId, fwVersion]
     );
 
     // 2) Bu cihazın son okumasını al (delta için).
