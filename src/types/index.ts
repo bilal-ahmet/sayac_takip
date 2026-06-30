@@ -9,6 +9,9 @@ export interface IncomingReading {
   devir: number;
   baslangic: number;
   toplam?: number; // cihazın hesapladığı toplam (opsiyonel)
+  period?: number; // anlık period değeri (opsiyonel)
+  "Threshold y"?: number; // kalibrasyon parametresi: cihazın bildirdiği güncel değer (opsiyonel)
+  "Mid y"?: number; // kalibrasyon parametresi: cihazın bildirdiği güncel değer (opsiyonel)
   time_synced?: number | boolean; // cihaz saati NTP ile çekebildi mi? 1/true=evet, 0/false=hayır
 }
 
@@ -37,6 +40,9 @@ export interface MeterReading {
   devir: number;
   baslangic: number;
   toplam: number | null;
+  period: number | null; // cihazın bildirdiği anlık period (yoksa null)
+  threshold_y: number | null; // kalibrasyon: cihazın bildirdiği güncel "Threshold y" (yoksa null)
+  mid_y: number | null; // kalibrasyon: cihazın bildirdiği güncel "Mid y" (yoksa null)
   sayac_delta: number | null;
   devir_delta: number | null;
   // Cihaz saati senkron muydu? false ise timestamp_unix sunucu saatiyle ikame
@@ -61,4 +67,30 @@ export interface ReadingResult {
   id: number;
   sayac_delta: number | null;
   devir_delta: number | null;
+}
+
+// Cihaz komutu yaşam döngüsü:
+//  pending   → oluşturuldu, henüz cihaza verilmedi
+//  delivered → cihaz GET ile en az bir kez çekti, ACK bekleniyor
+//  applied   → cihaz uyguladı ve ok=true ACK gönderdi
+//  failed    → cihaz uygulayamadı, ok=false ACK gönderdi (error dolu)
+//  cancelled → admin iptal etti / daha yeni komutla geçersiz kılındı
+export type CommandStatus =
+  | "pending"
+  | "delivered"
+  | "applied"
+  | "failed"
+  | "cancelled";
+
+// device_commands tablosu satırı — kalibrasyon/konfig değişikliği kuyruğu.
+export interface DeviceCommand {
+  id: number;
+  device_id: string;
+  type: string; // 'calibration' (ileride 'config' vb.)
+  payload: Record<string, number>; // cihazın anladığı anahtarlarla, ör. {"Threshold y": 10, "Mid y": 7}
+  status: CommandStatus;
+  error: string | null; // ok=false ACK'inde cihazın hata mesajı
+  created_at: string; // ISO timestamptz
+  delivered_at: string | null;
+  applied_at: string | null;
 }

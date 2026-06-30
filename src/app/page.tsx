@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DeviceWithStats, MeterReading } from "@/types";
+import type { DeviceWithStats, MeterReading, DeviceCommand } from "@/types";
 import {
   formatTimestamp,
   computeGaps,
@@ -15,6 +15,7 @@ import ReadingsTable from "@/components/ReadingsTable";
 import TimelineView from "@/components/TimelineView";
 import ReadingsFilters, { type DeltaCol } from "@/components/ReadingsFilters";
 import GapReport from "@/components/GapReport";
+import DeviceConfigPanel from "@/components/DeviceConfigPanel";
 
 const REFRESH_MS = 5_000;
 
@@ -22,6 +23,8 @@ export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
   const [readings, setReadings] = useState<MeterReading[]>([]);
+  // Seçili cihazın kalibrasyon/konfig komut geçmişi (panel için).
+  const [commands, setCommands] = useState<DeviceCommand[]>([]);
   // Stat kartları için gerçek son okuma. Yalnızca canlı yüklemede güncellenir;
   // filtre modunda korunur (filtrelenmiş sonuçların en yenisi değil).
   const [latest, setLatest] = useState<MeterReading | null>(null);
@@ -55,6 +58,20 @@ export default function Home() {
       setError(null);
       // İlk yüklemede seçili cihaz yoksa ilkini seç.
       setSelected((cur) => cur ?? list[0]?.device_id ?? null);
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+    }
+  }, []);
+
+  // Seçili cihazın komut geçmişini çek (kalibrasyon/konfig paneli için).
+  const loadCommands = useCallback(async (deviceId: string) => {
+    try {
+      const res = await fetch(
+        `/api/commands?device_id=${encodeURIComponent(deviceId)}&all=1`
+      );
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error ?? "Komutlar yüklenemedi");
+      setCommands(json.commands);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
     }
@@ -127,6 +144,17 @@ export default function Home() {
     }, REFRESH_MS);
     return () => clearInterval(id);
   }, [selected, filterActive, loadLive, loadFiltered, loadDevices]);
+
+  // Komut geçmişi: seçili cihaz değişince yükle + 5 sn'de bir tazele
+  // (filtre modunda da çalışır; applied/failed durumu otomatik güncellenir).
+  useEffect(() => {
+    if (!selected) return;
+    // setState fetch await'inden SONRA çalışır (senkron değil) — uyarı geçersiz.
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadCommands(selected);
+    const id = setInterval(() => loadCommands(selected), REFRESH_MS);
+    return () => clearInterval(id);
+  }, [selected, loadCommands]);
 
   // Seçili cihazın tüm okumalarını sil.
   async function handleReset() {
@@ -373,6 +401,14 @@ export default function Home() {
           <ReadingsTable readings={readings} gapToIds={gapToIds} />
         </div>
         <div className="flex flex-col gap-6 lg:col-span-1">
+          {selected && (
+            <DeviceConfigPanel
+              deviceId={selected}
+              latest={latest}
+              commands={commands}
+              onChanged={() => loadCommands(selected)}
+            />
+          )}
           <TimelineView readings={readings} />
           <GapReport gaps={gaps} timeoutSec={timeoutSec} />
         </div>
