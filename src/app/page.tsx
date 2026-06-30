@@ -9,6 +9,7 @@ import {
   downloadCSV,
 } from "@/lib/utils";
 import DeviceSelector from "@/components/DeviceSelector";
+import VersionFilter from "@/components/VersionFilter";
 import StatsCard from "@/components/StatsCard";
 import DeltaChart from "@/components/DeltaChart";
 import ReadingsTable from "@/components/ReadingsTable";
@@ -22,6 +23,8 @@ const REFRESH_MS = 5_000;
 export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  // Firmware versiyon filtresi (null = tümü). Cihaz seçicisini daraltır.
+  const [versionFilter, setVersionFilter] = useState<string | null>(null);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   // Seçili cihazın kalibrasyon/konfig komut geçmişi (panel için).
   const [commands, setCommands] = useState<DeviceCommand[]>([]);
@@ -212,6 +215,40 @@ export default function Home() {
     [gaps]
   );
 
+  // Sistemdeki benzersiz firmware versiyonları (filtre dropdown'u için).
+  const versions = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          devices
+            .map((d) => d.fw_version)
+            .filter((v): v is string => v != null && v !== "")
+        )
+      ).sort(),
+    [devices]
+  );
+
+  // Versiyon filtresi uygulanmış cihaz listesi (cihaz seçicisine verilir).
+  const filteredDevices = useMemo(
+    () =>
+      versionFilter
+        ? devices.filter((d) => d.fw_version === versionFilter)
+        : devices,
+    [devices, versionFilter]
+  );
+
+  // Versiyon filtresi değişince: seçili cihaz yeni listede yoksa ilkine geç.
+  function handleVersionChange(v: string | null) {
+    setVersionFilter(v);
+    const next = v ? devices.filter((d) => d.fw_version === v) : devices;
+    if (selected && !next.some((d) => d.device_id === selected)) {
+      setSelected(next[0]?.device_id ?? null);
+      setConfirmReset(null);
+      setConfirmDeleteDevice(null);
+      clearFilters();
+    }
+  }
+
   // Seçili cihaz (toplam okuma sayısı ve firmware sürümü için).
   const selectedDevice = devices.find((d) => d.device_id === selected);
   const totalCount = selectedDevice?.reading_count ?? readings.length;
@@ -275,8 +312,15 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-end gap-3">
+          {versions.length > 0 && (
+            <VersionFilter
+              versions={versions}
+              selected={versionFilter}
+              onSelect={handleVersionChange}
+            />
+          )}
           <DeviceSelector
-            devices={devices}
+            devices={filteredDevices}
             selected={selected}
             onSelect={(id) => {
               setSelected(id);
