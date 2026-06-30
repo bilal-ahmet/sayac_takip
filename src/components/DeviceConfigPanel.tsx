@@ -37,8 +37,7 @@ export default function DeviceConfigPanel({
   commands,
   onChanged,
 }: Props) {
-  const [thresholdY, setThresholdY] = useState("");
-  const [midY, setMidY] = useState("");
+  const [period, setPeriod] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
@@ -46,20 +45,11 @@ export default function DeviceConfigPanel({
     e.preventDefault();
     setError(null);
 
-    // En az bir alan girilmeli; girilenler sayı olmalı.
-    const payload: Record<string, number> = {};
-    if (thresholdY.trim() !== "") {
-      const n = Number(thresholdY);
-      if (!Number.isFinite(n)) return setError("Threshold y sayı olmalı");
-      payload["Threshold y"] = n;
-    }
-    if (midY.trim() !== "") {
-      const n = Number(midY);
-      if (!Number.isFinite(n)) return setError("Mid y sayı olmalı");
-      payload["Mid y"] = n;
-    }
-    if (Object.keys(payload).length === 0) {
-      return setError("En az bir alan girin (Threshold y / Mid y)");
+    // Cihaza bir süre (period, saniye) gönderilir; cihaz threshold/mid'i kendisi çıkarır.
+    if (period.trim() === "") return setError("Süre (period) girin");
+    const n = Number(period);
+    if (!Number.isFinite(n) || n < 0) {
+      return setError("Süre geçerli bir saniye değeri olmalı");
     }
 
     setSending(true);
@@ -67,12 +57,11 @@ export default function DeviceConfigPanel({
       const res = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_id: deviceId, payload }),
+        body: JSON.stringify({ device_id: deviceId, payload: { period: n } }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Komut gönderilemedi");
-      setThresholdY("");
-      setMidY("");
+      setPeriod("");
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
@@ -90,41 +79,31 @@ export default function DeviceConfigPanel({
       </div>
 
       <div className="flex flex-col gap-4 p-4">
-        {/* Cihazın son bildirdiği güncel değerler */}
-        <div className="grid grid-cols-3 gap-3">
-          <CurrentValue label="Threshold y" value={latest?.threshold_y} />
-          <CurrentValue label="Mid y" value={latest?.mid_y} />
-          <CurrentValue label="Period" value={latest?.period} />
+        {/* Cihazın son bildirdiği geçen süre (period). Cihaz threshold/mid'i bundan çıkarır. */}
+        <div className="grid grid-cols-1 gap-3">
+          <CurrentValue
+            label="Son bildirilen süre (period)"
+            value={latest?.period}
+            suffix="sn"
+          />
         </div>
 
-        {/* Yeni hedef gönder */}
+        {/* Yeni süre gönder — cihaz bu süreden threshold/mid'i dinamik hesaplar */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
-          <div className="grid grid-cols-2 gap-3">
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-zinc-500">
-                Threshold y
-              </span>
-              <input
-                type="number"
-                step="any"
-                value={thresholdY}
-                onChange={(e) => setThresholdY(e.target.value)}
-                placeholder="hedef"
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-              />
-            </label>
-            <label className="flex flex-col gap-1">
-              <span className="text-xs font-medium text-zinc-500">Mid y</span>
-              <input
-                type="number"
-                step="any"
-                value={midY}
-                onChange={(e) => setMidY(e.target.value)}
-                placeholder="hedef"
-                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-              />
-            </label>
-          </div>
+          <label className="flex flex-col gap-1">
+            <span className="text-xs font-medium text-zinc-500">
+              Süre / period (saniye)
+            </span>
+            <input
+              type="number"
+              step="any"
+              min={0}
+              value={period}
+              onChange={(e) => setPeriod(e.target.value)}
+              placeholder="örn. 120"
+              className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+            />
+          </label>
           {error && (
             <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
           )}
@@ -133,7 +112,7 @@ export default function DeviceConfigPanel({
             disabled={sending}
             className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
           >
-            {sending ? "Gönderiliyor…" : "Değişiklik Gönder"}
+            {sending ? "Gönderiliyor…" : "Süre Gönder"}
           </button>
         </form>
 
@@ -182,15 +161,17 @@ export default function DeviceConfigPanel({
 function CurrentValue({
   label,
   value,
+  suffix,
 }: {
   label: string;
   value: number | null | undefined;
+  suffix?: string;
 }) {
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
       <span className="text-xs text-zinc-500">{label}</span>
       <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
-        {value != null ? value : "—"}
+        {value != null ? `${value}${suffix ? ` ${suffix}` : ""}` : "—"}
       </span>
     </div>
   );

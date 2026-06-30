@@ -4,8 +4,9 @@ import type { DeviceCommand } from "@/types";
 
 // Dashboard geçmiş görünümünde dönen en fazla komut sayısı (egress tavanı).
 const HISTORY_CAP = 500;
-// Bir komut payload'ında kabul edilen kalibrasyon/parametre anahtarları.
-const ALLOWED_KEYS = ["Threshold y", "Mid y"] as const;
+// Bir komut payload'ında kabul edilen anahtarlar. Cihaza bir "period" (süre, saniye)
+// verilir; cihaz bu süreyi alıp threshold/mid'i kendisi dinamik olarak çıkarır.
+const ALLOWED_KEYS = ["period"] as const;
 
 // GET /api/commands?device_id=X
 //   - Varsayılan (cihaz poll'ü): status IN ('pending','delivered') olan komutlar

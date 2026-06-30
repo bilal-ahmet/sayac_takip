@@ -9,9 +9,7 @@ export interface IncomingReading {
   devir: number;
   baslangic: number;
   toplam?: number; // cihazın hesapladığı toplam (opsiyonel)
-  period?: number; // anlık period değeri (opsiyonel)
-  "Threshold y"?: number; // kalibrasyon parametresi: cihazın bildirdiği güncel değer (opsiyonel)
-  "Mid y"?: number; // kalibrasyon parametresi: cihazın bildirdiği güncel değer (opsiyonel)
+  period?: number; // cihazın bildirdiği geçen süre (saniye, opsiyonel)
   time_synced?: number | boolean; // cihaz saati NTP ile çekebildi mi? 1/true=evet, 0/false=hayır
 }
 
@@ -40,9 +38,7 @@ export interface MeterReading {
   devir: number;
   baslangic: number;
   toplam: number | null;
-  period: number | null; // cihazın bildirdiği anlık period (yoksa null)
-  threshold_y: number | null; // kalibrasyon: cihazın bildirdiği güncel "Threshold y" (yoksa null)
-  mid_y: number | null; // kalibrasyon: cihazın bildirdiği güncel "Mid y" (yoksa null)
+  period: number | null; // cihazın bildirdiği geçen süre (saniye, yoksa null)
   sayac_delta: number | null;
   devir_delta: number | null;
   // Cihaz saati senkron muydu? false ise timestamp_unix sunucu saatiyle ikame

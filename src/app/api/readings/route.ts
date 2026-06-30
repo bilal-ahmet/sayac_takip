@@ -31,12 +31,8 @@ export async function POST(request: NextRequest) {
   const { timestamp, sayac, devir, baslangic } = body;
   // toplam opsiyonel: sayı değilse null kaydedilir.
   const toplam = typeof body.toplam === "number" ? body.toplam : null;
-  // period ve kalibrasyon alanları (Threshold y / Mid y) opsiyonel: sayı değilse null.
-  // Boşluklu anahtarlar "Device Id" deseniyle aynı şekilde köşeli parantezle okunur.
+  // period (geçen süre, saniye) opsiyonel: sayı değilse null kaydedilir.
   const period = typeof body.period === "number" ? body.period : null;
-  const thresholdY =
-    typeof body["Threshold y"] === "number" ? body["Threshold y"] : null;
-  const midY = typeof body["Mid y"] === "number" ? body["Mid y"] : null;
   // fw_version cihaz başına sabit bilgidir; okuma satırına değil devices'a yazılır.
   const fwVersion =
     typeof body.fw_version === "string" && body.fw_version.trim() !== ""
@@ -103,10 +99,10 @@ export async function POST(request: NextRequest) {
     // 4) Okumayı kaydet.
     const inserted = await client.query<MeterReading>(
       `INSERT INTO meter_readings
-         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, threshold_y, mid_y, sayac_delta, devir_delta, time_synced)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, sayac_delta, devir_delta, time_synced)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
        RETURNING id`,
-      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced]
+      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, sayacDelta, devirDelta, synced]
     );
 
     await client.query("COMMIT");
@@ -198,7 +194,7 @@ export async function GET(request: NextRequest) {
                OVER (ORDER BY timestamp_unix ASC, id ASC) AS gap_sec
       FROM (
         SELECT id, device_id, timestamp_unix, recorded_at,
-               sayac, devir, baslangic, toplam, period, threshold_y, mid_y,
+               sayac, devir, baslangic, toplam, period,
                sayac_delta, devir_delta, time_synced
         FROM meter_readings
         WHERE ${where}
@@ -221,7 +217,7 @@ export async function GET(request: NextRequest) {
     sql = `
       WITH ordered AS (
         SELECT id, device_id, timestamp_unix, recorded_at,
-               sayac, devir, baslangic, toplam, period, threshold_y, mid_y,
+               sayac, devir, baslangic, toplam, period,
                sayac_delta, devir_delta, time_synced,
                timestamp_unix - LAG(timestamp_unix)
                  OVER (ORDER BY timestamp_unix ASC, id ASC) AS gap_sec
