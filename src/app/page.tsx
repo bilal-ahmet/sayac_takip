@@ -317,13 +317,13 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-end gap-3">
-          {deviceVersions.length > 0 && (
-            <VersionFilter
-              versions={deviceVersions}
-              selected={versionFilter}
-              onSelect={handleVersionChange}
-            />
-          )}
+          {/* Firmware seçici her zaman görünür: en üstte "Tüm veriler", altında
+              cihazın okumalarında geçen sürümler (hiç sürüm yoksa yalnız "Tüm veriler"). */}
+          <VersionFilter
+            versions={deviceVersions}
+            selected={versionFilter}
+            onSelect={handleVersionChange}
+          />
           <DeviceSelector
             devices={devices}
             selected={selected}
