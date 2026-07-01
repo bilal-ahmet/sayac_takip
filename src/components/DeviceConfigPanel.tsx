@@ -31,12 +31,24 @@ const STATUS_LABEL: Record<CommandStatus, string> = {
   cancelled: "iptal",
 };
 
+// Oluşturulabilecek bildirim türleri. Şimdilik yalnızca kalibrasyon;
+// ileride konfigürasyon vb. eklenebilir (her tür kendi giriş alanını gösterir).
+const TYPES: { value: string; label: string }[] = [
+  { value: "calibration", label: "Kalibrasyon" },
+];
+
+// Komut türünün insan-okunur etiketi (bilinmeyen tür ham değeriyle gösterilir).
+function typeLabel(value: string): string {
+  return TYPES.find((t) => t.value === value)?.label ?? value;
+}
+
 export default function DeviceConfigPanel({
   deviceId,
   latest,
   commands,
   onChanged,
 }: Props) {
+  const [type, setType] = useState("calibration");
   const [period, setPeriod] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -45,7 +57,7 @@ export default function DeviceConfigPanel({
     e.preventDefault();
     setError(null);
 
-    // Cihaza bir süre (period, saniye) gönderilir; cihaz threshold/mid'i kendisi çıkarır.
+    // Kalibrasyon: cihaza bir süre (period, saniye) gönderilir; cihaz threshold/mid'i kendisi çıkarır.
     if (period.trim() === "") return setError("Süre (period) girin");
     const n = Number(period);
     if (!Number.isFinite(n) || n < 0) {
@@ -57,7 +69,7 @@ export default function DeviceConfigPanel({
       const res = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_id: deviceId, payload: { period: n } }),
+        body: JSON.stringify({ device_id: deviceId, type, payload: { period: n } }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Komut gönderilemedi");
@@ -79,31 +91,50 @@ export default function DeviceConfigPanel({
       </div>
 
       <div className="flex flex-col gap-4 p-4">
-        {/* Cihazın son bildirdiği geçen süre (period). Cihaz threshold/mid'i bundan çıkarır. */}
-        <div className="grid grid-cols-1 gap-3">
-          <CurrentValue
-            label="Son bildirilen süre (period)"
-            value={latest?.period}
-            suffix="sn"
-          />
+        {/* Cihazın son bildirdiği değerler: süre (period) + cihazın bu süreden
+            türetip uyguladığı güncel Threshold y / Mid y. */}
+        <div className="grid grid-cols-3 gap-3">
+          <CurrentValue label="Süre (period)" value={latest?.period} suffix="sn" />
+          <CurrentValue label="Threshold y" value={latest?.threshold_y} />
+          <CurrentValue label="Mid y" value={latest?.mid_y} />
         </div>
 
-        {/* Yeni süre gönder — cihaz bu süreden threshold/mid'i dinamik hesaplar */}
+        {/* Yeni bildirim oluştur: tür seç → alanları doldur → gönder */}
         <form onSubmit={handleSubmit} className="flex flex-col gap-3">
           <label className="flex flex-col gap-1">
             <span className="text-xs font-medium text-zinc-500">
-              Süre / period (saniye)
+              Bildirim türü
             </span>
-            <input
-              type="number"
-              step="any"
-              min={0}
-              value={period}
-              onChange={(e) => setPeriod(e.target.value)}
-              placeholder="örn. 120"
+            <select
+              value={type}
+              onChange={(e) => setType(e.target.value)}
               className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
-            />
+            >
+              {TYPES.map((t) => (
+                <option key={t.value} value={t.value}>
+                  {t.label}
+                </option>
+              ))}
+            </select>
           </label>
+
+          {/* Kalibrasyon: süre girişi (cihaz bu süreden threshold/mid'i dinamik hesaplar) */}
+          {type === "calibration" && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-zinc-500">
+                Süre / period (saniye)
+              </span>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                value={period}
+                onChange={(e) => setPeriod(e.target.value)}
+                placeholder="örn. 120"
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+            </label>
+          )}
           {error && (
             <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
           )}
@@ -112,7 +143,7 @@ export default function DeviceConfigPanel({
             disabled={sending}
             className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
           >
-            {sending ? "Gönderiliyor…" : "Süre Gönder"}
+            {sending ? "Gönderiliyor…" : "Gönder"}
           </button>
         </form>
 
@@ -131,10 +162,14 @@ export default function DeviceConfigPanel({
                   className="flex items-center justify-between gap-2 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800"
                 >
                   <div className="min-w-0">
-                    <p className="truncate font-mono text-xs text-zinc-700 dark:text-zinc-300">
-                      {Object.entries(c.payload)
-                        .map(([k, v]) => `${k}=${v}`)
-                        .join(" · ")}
+                    <p className="truncate text-xs text-zinc-700 dark:text-zinc-300">
+                      <span className="font-medium">{typeLabel(c.type)}</span>
+                      <span className="font-mono text-zinc-500">
+                        {" · "}
+                        {Object.entries(c.payload)
+                          .map(([k, v]) => `${k}=${v}`)
+                          .join(" · ")}
+                      </span>
                     </p>
                     <p className="text-xs text-zinc-400">
                       {formatTimestamp(
