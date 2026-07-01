@@ -47,6 +47,9 @@ export interface MeterReading {
   mid_y: number | null; // cihazın süreden türetip bildirdiği güncel Mid y (yoksa null)
   sayac_delta: number | null;
   devir_delta: number | null;
+  // Bu okumanın alındığı sırada cihazın bildirdiği firmware sürümü (yoksa null).
+  // Okuma başına tutulur; grafik/tablo versiyona göre süzülebilsin diye.
+  fw_version: string | null;
   // Cihaz saati senkron muydu? false ise timestamp_unix sunucu saatiyle ikame
   // edilmiştir (cihaz timestamp=0 gönderdi). Dashboard'da rozetle işaretlenir.
   time_synced: boolean;

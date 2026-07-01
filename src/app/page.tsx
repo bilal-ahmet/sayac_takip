@@ -23,8 +23,11 @@ const REFRESH_MS = 5_000;
 export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
-  // Firmware versiyon filtresi (null = tümü). Cihaz seçicisini daraltır.
+  // Firmware versiyon filtresi (null = tümü). Seçili cihazın okumalarını versiyona
+  // göre süzer (cihazı değiştirmez); grafik/tablo/kartlar o versiyonu gösterir.
   const [versionFilter, setVersionFilter] = useState<string | null>(null);
+  // Seçili cihazın okumalarında geçen benzersiz firmware sürümleri (dropdown için).
+  const [deviceVersions, setDeviceVersions] = useState<string[]>([]);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   // Seçili cihazın kalibrasyon/konfig komut geçmişi (panel için).
   const [commands, setCommands] = useState<DeviceCommand[]>([]);
@@ -80,22 +83,40 @@ export default function Home() {
     }
   }, []);
 
-  // Canlı mod: son 200 okumayı çek (filtre yokken, 5 sn'de bir).
-  const loadLive = useCallback(async (deviceId: string) => {
+  // Seçili cihazın okumalarında geçen firmware sürümlerini çek (dropdown için).
+  const loadVersions = useCallback(async (deviceId: string) => {
     try {
       const res = await fetch(
-        `/api/readings?device_id=${encodeURIComponent(deviceId)}&limit=200`
+        `/api/readings?device_id=${encodeURIComponent(deviceId)}&versions=1`
       );
       const json = await res.json();
-      if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
-      setReadings(json.readings);
-      setLatest(json.readings[0] ?? null);
-      setError(null);
-      setLastRefresh(new Date());
+      if (!json.success) throw new Error(json.error ?? "Sürümler yüklenemedi");
+      setDeviceVersions(json.versions);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
     }
   }, []);
+
+  // Canlı mod: son 200 okumayı çek (filtre yokken, 5 sn'de bir).
+  // versionFilter set ise sunucu okumaları o firmware sürümüne göre süzer.
+  const loadLive = useCallback(
+    async (deviceId: string) => {
+      try {
+        const qs = new URLSearchParams({ device_id: deviceId, limit: "200" });
+        if (versionFilter) qs.set("fw_version", versionFilter);
+        const res = await fetch(`/api/readings?${qs.toString()}`);
+        const json = await res.json();
+        if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
+        setReadings(json.readings);
+        setLatest(json.readings[0] ?? null);
+        setError(null);
+        setLastRefresh(new Date());
+      } catch (e) {
+        setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+      }
+    },
+    [versionFilter]
+  );
 
   // Filtre modu: sunucuda tüm geçmişi tara, sadece eşleşenleri çek (poll yok).
   const loadFiltered = useCallback(
@@ -110,6 +131,7 @@ export default function Home() {
           qs.set("only_gaps", "1");
           qs.set("timeout_sec", String(timeoutSec));
         }
+        if (versionFilter) qs.set("fw_version", versionFilter);
         const res = await fetch(`/api/readings?${qs.toString()}`);
         const json = await res.json();
         if (!json.success) throw new Error(json.error ?? "Okumalar yüklenemedi");
@@ -120,7 +142,7 @@ export default function Home() {
         setError(e instanceof Error ? e.message : "Bilinmeyen hata");
       }
     },
-    [deltaCol, deltaThreshold, onlyGaps, timeoutSec]
+    [deltaCol, deltaThreshold, onlyGaps, timeoutSec, versionFilter]
   );
 
   // İlk yükleme: cihazları çek. setState'ler fetch await'inden SONRA çalışır
@@ -159,6 +181,14 @@ export default function Home() {
     return () => clearInterval(id);
   }, [selected, loadCommands]);
 
+  // Seçili cihaz değişince o cihaza ait firmware sürüm listesini tazele.
+  // (setState loadVersions içinde fetch await'inden SONRA çalışır — senkron değil.)
+  useEffect(() => {
+    if (!selected) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    loadVersions(selected);
+  }, [selected, loadVersions]);
+
   // Seçili cihazın tüm okumalarını sil.
   async function handleReset() {
     if (!selected) return;
@@ -195,6 +225,8 @@ export default function Home() {
       if (!json.success) throw new Error(json.error ?? "Cihaz silinemedi");
       setReadings([]);
       setLatest(null);
+      setDeviceVersions([]);
+      setVersionFilter(null);
       setSelected(null); // loadDevices ardından yeni ilk cihazı seçer
       setError(null);
       await loadDevices();
@@ -215,38 +247,11 @@ export default function Home() {
     [gaps]
   );
 
-  // Sistemdeki benzersiz firmware versiyonları (filtre dropdown'u için).
-  const versions = useMemo(
-    () =>
-      Array.from(
-        new Set(
-          devices
-            .map((d) => d.fw_version)
-            .filter((v): v is string => v != null && v !== "")
-        )
-      ).sort(),
-    [devices]
-  );
-
-  // Versiyon filtresi uygulanmış cihaz listesi (cihaz seçicisine verilir).
-  const filteredDevices = useMemo(
-    () =>
-      versionFilter
-        ? devices.filter((d) => d.fw_version === versionFilter)
-        : devices,
-    [devices, versionFilter]
-  );
-
-  // Versiyon filtresi değişince: seçili cihaz yeni listede yoksa ilkine geç.
+  // Versiyon filtresi değişince yalnızca filtreyi güncelle; cihaz seçimi sabit
+  // kalır. loadLive/loadFiltered versionFilter'a bağlı olduğundan okumalar
+  // sunucudan yeniden çekilip grafik/tablo o versiyona göre süzülür.
   function handleVersionChange(v: string | null) {
     setVersionFilter(v);
-    const next = v ? devices.filter((d) => d.fw_version === v) : devices;
-    if (selected && !next.some((d) => d.device_id === selected)) {
-      setSelected(next[0]?.device_id ?? null);
-      setConfirmReset(null);
-      setConfirmDeleteDevice(null);
-      clearFilters();
-    }
   }
 
   // Seçili cihaz (toplam okuma sayısı ve firmware sürümü için).
@@ -269,9 +274,9 @@ export default function Home() {
     try {
       let rows = readings;
       if (!filterActive) {
-        const res = await fetch(
-          `/api/readings?device_id=${encodeURIComponent(selected)}&all=1`
-        );
+        const qs = new URLSearchParams({ device_id: selected, all: "1" });
+        if (versionFilter) qs.set("fw_version", versionFilter);
+        const res = await fetch(`/api/readings?${qs.toString()}`);
         const json = await res.json();
         if (!json.success) throw new Error(json.error ?? "Dışa aktarılamadı");
         rows = json.readings;
@@ -312,18 +317,19 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-end gap-3">
-          {versions.length > 0 && (
+          {deviceVersions.length > 0 && (
             <VersionFilter
-              versions={versions}
+              versions={deviceVersions}
               selected={versionFilter}
               onSelect={handleVersionChange}
             />
           )}
           <DeviceSelector
-            devices={filteredDevices}
+            devices={devices}
             selected={selected}
             onSelect={(id) => {
               setSelected(id);
+              setVersionFilter(null);
               setConfirmReset(null);
               setConfirmDeleteDevice(null);
               clearFilters();

@@ -101,13 +101,16 @@ export async function POST(request: NextRequest) {
     const devirDelta =
       prev.rows.length > 0 ? devir - prev.rows[0].devir : null;
 
-    // 4) Okumayı kaydet.
+    // 4) Okumayı kaydet. fw_version okuma başına yazılır (aynı cihaz zamanla farklı
+    //    firmware'de okuma üretebilir; grafik versiyona göre süzülebilsin). POST'ta
+    //    fw_version gelmezse cihazın kayıtlı güncel sürümüne düşülür (COALESCE).
     const inserted = await client.query<MeterReading>(
       `INSERT INTO meter_readings
-         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, threshold_y, mid_y, sayac_delta, devir_delta, time_synced)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, threshold_y, mid_y, sayac_delta, devir_delta, time_synced, fw_version)
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
+               COALESCE($13, (SELECT fw_version FROM devices WHERE device_id = $1)))
        RETURNING id`,
-      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced]
+      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced, fwVersion]
     );
 
     await client.query("COMMIT");
@@ -153,8 +156,34 @@ export async function GET(request: NextRequest) {
     );
   }
 
+  // ?versions=1 → bu cihazın okumalarında geçen benzersiz firmware sürümleri.
+  // Firmware filtre dropdown'unu cihaz-başına beslemek için (yan etki yok).
+  if (params.get("versions") === "1") {
+    try {
+      const result = await pool.query<{ fw_version: string }>(
+        `SELECT DISTINCT fw_version
+         FROM meter_readings
+         WHERE device_id = $1 AND fw_version IS NOT NULL
+         ORDER BY fw_version`,
+        [deviceId]
+      );
+      return NextResponse.json({
+        success: true,
+        versions: result.rows.map((r) => r.fw_version),
+      });
+    } catch (err) {
+      console.error("GET /api/readings?versions hata:", err);
+      return NextResponse.json(
+        { success: false, error: "Sunucu hatası" },
+        { status: 500 }
+      );
+    }
+  }
+
   const from = params.get("from");
   const to = params.get("to");
+  // Firmware sürümü filtresi (opsiyonel): sadece o versiyonda alınmış okumalar döner.
+  const fwVersion = params.get("fw_version");
   // delta_col yalnızca iki sabit kolona izin verir (SQL'e gömülür, injection yok).
   const deltaCol = params.get("delta_col") === "devir" ? "devir_delta" : "sayac_delta";
   const deltaThreshold = Number(params.get("delta_threshold")) || 0;
@@ -173,6 +202,10 @@ export async function GET(request: NextRequest) {
   if (to) {
     values.push(Number(to));
     where += ` AND timestamp_unix <= $${values.length}`;
+  }
+  if (fwVersion) {
+    values.push(fwVersion);
+    where += ` AND fw_version = $${values.length}`;
   }
 
   let sql: string;
@@ -200,7 +233,7 @@ export async function GET(request: NextRequest) {
       FROM (
         SELECT id, device_id, timestamp_unix, recorded_at,
                sayac, devir, baslangic, toplam, period, threshold_y, mid_y,
-               sayac_delta, devir_delta, time_synced
+               sayac_delta, devir_delta, time_synced, fw_version
         FROM meter_readings
         WHERE ${where}
         ORDER BY timestamp_unix DESC, id DESC
@@ -223,7 +256,7 @@ export async function GET(request: NextRequest) {
       WITH ordered AS (
         SELECT id, device_id, timestamp_unix, recorded_at,
                sayac, devir, baslangic, toplam, period, threshold_y, mid_y,
-               sayac_delta, devir_delta, time_synced,
+               sayac_delta, devir_delta, time_synced, fw_version,
                timestamp_unix - LAG(timestamp_unix)
                  OVER (ORDER BY timestamp_unix ASC, id ASC) AS gap_sec
         FROM meter_readings

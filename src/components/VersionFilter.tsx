@@ -1,13 +1,14 @@
 "use client";
 
 interface Props {
-  versions: string[]; // sistemdeki benzersiz fw_version listesi
+  versions: string[]; // seçili cihazın okumalarında geçen fw_version listesi
   selected: string | null; // null = tümü
   onSelect: (version: string | null) => void;
 }
 
-// Firmware versiyonuna göre cihaz listesini daraltan dropdown.
-// fw_version cihaz başına tek değer olduğundan filtre cihaz seçicisini etkiler.
+// Firmware versiyonuna göre süzen dropdown.
+// Seçili cihazın okumalarını versiyona göre süzer (cihazı değiştirmez);
+// grafik/tablo/kartlar yalnızca o versiyonda alınmış okumaları gösterir.
 export default function VersionFilter({ versions, selected, onSelect }: Props) {
   return (
     <label className="flex flex-col gap-1 text-sm">
