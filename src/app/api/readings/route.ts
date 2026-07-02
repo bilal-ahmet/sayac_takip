@@ -78,12 +78,16 @@ export async function POST(request: NextRequest) {
 
     // 1) Cihaz yoksa ekle; varsa firmware sürümünü güncelle (en son bildirilen).
     //    fw_version null gelirse mevcut değer korunur (COALESCE).
-    await client.query(
+    //    RETURNING ile cihazın güncel fw_version'ını al: okuma satırında POST'ta
+    //    fw_version gelmezse buna düşülür (aşağıda düz parametre olarak kullanılır).
+    const dev = await client.query<{ fw_version: string | null }>(
       `INSERT INTO devices (device_id, fw_version) VALUES ($1, $2)
        ON CONFLICT (device_id)
-       DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)`,
+       DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)
+       RETURNING fw_version`,
       [deviceId, fwVersion]
     );
+    const effectiveFw = dev.rows[0]?.fw_version ?? null;
 
     // 2) Bu cihazın son okumasını al (delta için).
     const prev = await client.query<{ sayac: number; devir: number }>(
@@ -103,14 +107,13 @@ export async function POST(request: NextRequest) {
 
     // 4) Okumayı kaydet. fw_version okuma başına yazılır (aynı cihaz zamanla farklı
     //    firmware'de okuma üretebilir; grafik versiyona göre süzülebilsin). POST'ta
-    //    fw_version gelmezse cihazın kayıtlı güncel sürümüne düşülür (COALESCE).
+    //    fw_version gelmezse cihazın kayıtlı güncel sürümüne (effectiveFw) düşülür.
     const inserted = await client.query<MeterReading>(
       `INSERT INTO meter_readings
          (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, threshold_y, mid_y, sayac_delta, devir_delta, time_synced, fw_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12,
-               COALESCE($13, (SELECT fw_version FROM devices WHERE device_id = $1)))
+       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
        RETURNING id`,
-      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced, fwVersion]
+      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced, effectiveFw]
     );
 
     await client.query("COMMIT");

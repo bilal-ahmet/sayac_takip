@@ -258,6 +258,11 @@ export default function Home() {
   const selectedDevice = devices.find((d) => d.device_id === selected);
   const totalCount = selectedDevice?.reading_count ?? readings.length;
 
+  // Okuma listesi/zaman çizelgesi sayfalamasını 1'e döndüren bağlam anahtarı.
+  // Cihaz/sürüm/filtre değişince değişir; auto-refresh'te sabit kalır (aksi halde
+  // kullanıcı önceki sayfalara bakarken 5 sn'de bir 1. sayfaya dönerdi).
+  const listResetKey = `${selected ?? ""}|${versionFilter ?? ""}|${deltaCol}|${deltaThreshold}|${timeoutSec}|${onlyGaps}`;
+
   // Filtreleri temizle → filterActive false olur → effect canlı poll'ü sürdürür.
   function clearFilters() {
     setDeltaThreshold(0);
@@ -448,7 +453,11 @@ export default function Home() {
             onExport={handleExportCSV}
             exporting={exporting}
           />
-          <ReadingsTable readings={readings} gapToIds={gapToIds} />
+          <ReadingsTable
+            readings={readings}
+            gapToIds={gapToIds}
+            resetKey={listResetKey}
+          />
         </div>
         <div className="flex flex-col gap-6 lg:col-span-1">
           {selected && (
@@ -459,7 +468,7 @@ export default function Home() {
               onChanged={() => loadCommands(selected)}
             />
           )}
-          <TimelineView readings={readings} />
+          <TimelineView readings={readings} resetKey={listResetKey} />
           <GapReport gaps={gaps} timeoutSec={timeoutSec} />
         </div>
       </section>

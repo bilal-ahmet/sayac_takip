@@ -9,19 +9,24 @@ const PAGE_SIZE = 10;
 
 interface Props {
   readings: MeterReading[];
+  // Sayfayı 1'e döndüren bağlam anahtarı (cihaz/sürüm/filtre). Auto-refresh'te
+  // değişmediğinden, kullanıcı önceki sayfalara bakarken 5 sn'de bir 1'e dönmez.
+  resetKey?: string;
 }
 
-export default function TimelineView({ readings }: Props) {
+export default function TimelineView({ readings, resetKey }: Props) {
   const [page, setPage] = useState(1);
 
-  // Yeni veri gelince ilk sayfaya dön.
+  // Yalnızca bağlam (cihaz/sürüm/filtre) değişince ilk sayfaya dön; auto-refresh'te değil.
   useEffect(() => {
     // eslint-disable-next-line react-hooks/set-state-in-effect
     setPage(1);
-  }, [readings]);
+  }, [resetKey]);
 
   const totalPages = Math.max(1, Math.ceil(readings.length / PAGE_SIZE));
-  const slice = readings.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  // Veri küçülürse mevcut sayfa aralık dışı kalmasın.
+  const safePage = Math.min(page, totalPages);
+  const slice = readings.slice((safePage - 1) * PAGE_SIZE, safePage * PAGE_SIZE);
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
@@ -60,10 +65,10 @@ export default function TimelineView({ readings }: Props) {
         )}
       </div>
       <Pagination
-        page={page}
+        page={safePage}
         totalPages={totalPages}
-        onPrev={() => setPage((p) => p - 1)}
-        onNext={() => setPage((p) => p + 1)}
+        onPrev={() => setPage(safePage - 1)}
+        onNext={() => setPage(safePage + 1)}
       />
     </div>
   );
