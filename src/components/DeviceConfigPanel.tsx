@@ -7,6 +7,7 @@ import { formatTimestamp } from "@/lib/utils";
 interface Props {
   deviceId: string;
   latest: MeterReading | null;
+  readings: MeterReading[]; // son okumalar (en yeni önce) — son "gerçek" threshold/mid için
   commands: DeviceCommand[];
   onChanged: () => void; // başarılı komut sonrası listeyi tazelemek için
 }
@@ -45,9 +46,18 @@ function typeLabel(value: string): string {
 export default function DeviceConfigPanel({
   deviceId,
   latest,
+  readings,
   commands,
   onChanged,
 }: Props) {
+  // Cihaz threshold/mid'i her pakette anlamlı göndermez (çoğu pakette 0 gelir).
+  // Bu yüzden "en son gerçek (0 olmayan) değeri" gösterip sabit tutuyoruz;
+  // readings en yeni önce sıralı olduğundan ilk eşleşen en güncel gerçek değerdir.
+  const lastThreshold = readings.find(
+    (r) => r.threshold_y != null && r.threshold_y !== 0
+  );
+  const lastMid = readings.find((r) => r.mid_y != null && r.mid_y !== 0);
+
   const [type, setType] = useState("calibration");
   const [period, setPeriod] = useState("");
   const [sending, setSending] = useState(false);
@@ -91,12 +101,28 @@ export default function DeviceConfigPanel({
       </div>
 
       <div className="flex flex-col gap-4 p-4">
-        {/* Cihazın son bildirdiği değerler: süre (period) + cihazın bu süreden
-            türetip uyguladığı güncel Threshold y / Mid y. */}
+        {/* Süre (period) her pakette gelir → en son okumadan. Threshold/Mid ise
+            seyrek gelir (çoğu pakette 0) → en son GERÇEK (0 olmayan) değeri sabit göster. */}
         <div className="grid grid-cols-3 gap-3">
           <CurrentValue label="Süre (period)" value={latest?.period} suffix="sn" />
-          <CurrentValue label="Threshold y" value={latest?.threshold_y} />
-          <CurrentValue label="Mid y" value={latest?.mid_y} />
+          <CurrentValue
+            label="Threshold y"
+            value={lastThreshold?.threshold_y}
+            hint={
+              lastThreshold
+                ? `en son ${formatTimestamp(lastThreshold.timestamp_unix)}`
+                : "henüz değer yok"
+            }
+          />
+          <CurrentValue
+            label="Mid y"
+            value={lastMid?.mid_y}
+            hint={
+              lastMid
+                ? `en son ${formatTimestamp(lastMid.timestamp_unix)}`
+                : "henüz değer yok"
+            }
+          />
         </div>
 
         {/* Yeni bildirim oluştur: tür seç → alanları doldur → gönder */}
@@ -197,10 +223,12 @@ function CurrentValue({
   label,
   value,
   suffix,
+  hint,
 }: {
   label: string;
   value: number | null | undefined;
   suffix?: string;
+  hint?: string;
 }) {
   return (
     <div className="flex flex-col gap-0.5 rounded-lg border border-zinc-200 px-3 py-2 dark:border-zinc-800">
@@ -208,6 +236,7 @@ function CurrentValue({
       <span className="text-lg font-semibold text-zinc-900 dark:text-zinc-100">
         {value != null ? `${value}${suffix ? ` ${suffix}` : ""}` : "—"}
       </span>
+      {hint && <span className="text-[11px] text-zinc-400">{hint}</span>}
     </div>
   );
 }

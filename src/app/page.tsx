@@ -464,6 +464,7 @@ export default function Home() {
             <DeviceConfigPanel
               deviceId={selected}
               latest={latest}
+              readings={readings}
               commands={commands}
               onChanged={() => loadCommands(selected)}
             />
