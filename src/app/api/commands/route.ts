@@ -1,12 +1,47 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
-import type { DeviceCommand } from "@/types";
+import type { DeviceCommand, CommandType } from "@/types";
 
 // Dashboard geçmiş görünümünde dönen en fazla komut sayısı (egress tavanı).
 const HISTORY_CAP = 500;
-// Bir komut payload'ında kabul edilen anahtarlar. Cihaza bir "period" (süre, saniye)
-// verilir; cihaz bu süreyi alıp threshold/mid'i kendisi dinamik olarak çıkarır.
-const ALLOWED_KEYS = ["period"] as const;
+
+// Tip → payload doğrulayıcı. Her doğrulayıcı ham payload'ı alır; geçerliyse
+// cihaza kaydedilecek temiz payload'ı döndürür, geçersizse hata mesajı döndürür.
+// Böylece her komut tipi kendi sözleşmesini uygular (tek bir ALLOWED_KEYS yerine).
+type Validation = { payload: Record<string, number> } | { error: string };
+
+function num(v: unknown): number | null {
+  return typeof v === "number" && Number.isFinite(v) ? v : null;
+}
+
+const VALIDATORS: Record<CommandType, (src: Record<string, unknown>) => Validation> = {
+  // Kalibrasyon: cihaza süre (period, saniye) verilir; threshold/mid'i cihaz çıkarır.
+  calibration: (src) => {
+    const period = num(src.period);
+    if (period === null || period < 0) {
+      return { error: "period sayı ve >= 0 olmalı" };
+    }
+    return { payload: { period } };
+  },
+  // Sıfırlama komutları payload taşımaz; cihaz tipe bakıp register'ı 0'a çeker.
+  reset_counter: () => ({ payload: {} }),
+  reset_devir: () => ({ payload: {} }),
+  // Set komutları hedef değeri taşır; cihaz register'ı value'ya yazar.
+  set_counter: (src) => {
+    const value = num(src.value);
+    if (value === null || value < 0) {
+      return { error: "value sayı ve >= 0 olmalı" };
+    }
+    return { payload: { value } };
+  },
+  set_devir: (src) => {
+    const value = num(src.value);
+    if (value === null || value < 0) {
+      return { error: "value sayı ve >= 0 olmalı" };
+    }
+    return { payload: { value } };
+  },
+};
 
 // GET /api/commands?device_id=X
 //   - Varsayılan (cihaz poll'ü): status IN ('pending','delivered') olan komutlar
@@ -126,30 +161,27 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  // payload doğrulama: izin verilen anahtarlardan en az biri, hepsi sayı olmalı.
-  const src = body.payload ?? {};
-  const payload: Record<string, number> = {};
-  for (const key of ALLOWED_KEYS) {
-    if (key in src) {
-      const v = src[key];
-      if (typeof v !== "number" || !Number.isFinite(v)) {
-        return NextResponse.json(
-          { success: false, error: `Geçersiz değer: ${key} sayı olmalı` },
-          { status: 400 }
-        );
-      }
-      payload[key] = v;
-    }
-  }
-  if (Object.keys(payload).length === 0) {
+  // Tip whitelist: yalnızca tanımlı komut tipleri kabul edilir.
+  const validator = VALIDATORS[type as CommandType];
+  if (!validator) {
     return NextResponse.json(
       {
         success: false,
-        error: `payload en az bir alan içermeli: ${ALLOWED_KEYS.join(", ")}`,
+        error: `Geçersiz tip: ${type}. İzin verilenler: ${Object.keys(VALIDATORS).join(", ")}`,
       },
       { status: 400 }
     );
   }
+
+  // Payload'ı tipe göre doğrula ve temizle.
+  const result = validator(body.payload ?? {});
+  if ("error" in result) {
+    return NextResponse.json(
+      { success: false, error: result.error },
+      { status: 400 }
+    );
+  }
+  const payload = result.payload;
 
   const client = await pool.connect();
   try {
@@ -168,12 +200,14 @@ export async function POST(request: NextRequest) {
       );
     }
 
-    // Bekleyen eski komutları iptal et (tek güncel hedef).
+    // Aynı tipteki bekleyen eski komutları iptal et (her tipin tek güncel hedefi).
+    // Farklı tipler (ör. bekleyen bir calibration) etkilenmez; böylece bir
+    // set_counter göndermek kalibrasyonu geçersiz kılmaz.
     await client.query(
       `UPDATE device_commands
        SET status = 'cancelled'
-       WHERE device_id = $1 AND status IN ('pending', 'delivered')`,
-      [deviceId]
+       WHERE device_id = $1 AND type = $2 AND status IN ('pending', 'delivered')`,
+      [deviceId, type]
     );
 
     const inserted = await client.query<DeviceCommand>(

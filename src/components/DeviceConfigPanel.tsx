@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { DeviceCommand, MeterReading, CommandStatus } from "@/types";
+import type {
+  DeviceCommand,
+  MeterReading,
+  CommandStatus,
+  CommandType,
+} from "@/types";
 import { formatTimestamp } from "@/lib/utils";
 
 interface Props {
@@ -32,16 +37,29 @@ const STATUS_LABEL: Record<CommandStatus, string> = {
   cancelled: "iptal",
 };
 
-// Oluşturulabilecek bildirim türleri. Şimdilik yalnızca kalibrasyon;
-// ileride konfigürasyon vb. eklenebilir (her tür kendi giriş alanını gösterir).
-const TYPES: { value: string; label: string }[] = [
+// Oluşturulabilecek komut türleri. Her tür kendi giriş alanını gösterir.
+const TYPES: { value: CommandType; label: string }[] = [
   { value: "calibration", label: "Kalibrasyon" },
+  { value: "set_counter", label: "Sayacı Ayarla" },
+  { value: "set_devir", label: "Deviri Ayarla" },
+  { value: "reset_counter", label: "Sayacı Sıfırla" },
+  { value: "reset_devir", label: "Deviri Sıfırla" },
 ];
 
 // Komut türünün insan-okunur etiketi (bilinmeyen tür ham değeriyle gösterilir).
 function typeLabel(value: string): string {
   return TYPES.find((t) => t.value === value)?.label ?? value;
 }
+
+// Sayaç/devir set eden tipler → sayısal "value" alanı ister.
+const VALUE_TYPES: CommandType[] = ["set_counter", "set_devir"];
+// Fiziksel cihaz register'ını değiştiren tipler → gönderimden önce onay ister.
+const CONFIRM_TYPES: CommandType[] = [
+  "set_counter",
+  "set_devir",
+  "reset_counter",
+  "reset_devir",
+];
 
 export default function DeviceConfigPanel({
   deviceId,
@@ -58,20 +76,66 @@ export default function DeviceConfigPanel({
   );
   const lastMid = readings.find((r) => r.mid_y != null && r.mid_y !== 0);
 
-  const [type, setType] = useState("calibration");
+  const [type, setType] = useState<CommandType>("calibration");
   const [period, setPeriod] = useState("");
+  const [value, setValue] = useState("");
   const [sending, setSending] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Fiziksel komutlar için iki adımlı onay: true iken "Emin misin?" gösterilir.
+  const [confirming, setConfirming] = useState(false);
+
+  const needsValue = VALUE_TYPES.includes(type);
+  const needsConfirm = CONFIRM_TYPES.includes(type);
+
+  // Tip değişince onay/hatayı sıfırla (yanlış tip için asılı kalmasın).
+  function handleTypeChange(next: CommandType) {
+    setType(next);
+    setConfirming(false);
+    setError(null);
+  }
+
+  // Girdileri tipe göre doğrula → cihaza gönderilecek payload'ı üret.
+  // Geçersizse hata metni döner (null payload).
+  function buildPayload(): Record<string, number> | null {
+    if (type === "calibration") {
+      if (period.trim() === "") {
+        setError("Süre (period) girin");
+        return null;
+      }
+      const n = Number(period);
+      if (!Number.isFinite(n) || n < 0) {
+        setError("Süre geçerli bir saniye değeri olmalı");
+        return null;
+      }
+      return { period: n };
+    }
+    if (needsValue) {
+      if (value.trim() === "") {
+        setError("Bir değer girin");
+        return null;
+      }
+      const n = Number(value);
+      if (!Number.isFinite(n) || n < 0) {
+        setError("Değer geçerli bir sayı olmalı (>= 0)");
+        return null;
+      }
+      return { value: n };
+    }
+    // reset_counter / reset_devir → payload taşımaz.
+    return {};
+  }
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
     setError(null);
 
-    // Kalibrasyon: cihaza bir süre (period, saniye) gönderilir; cihaz threshold/mid'i kendisi çıkarır.
-    if (period.trim() === "") return setError("Süre (period) girin");
-    const n = Number(period);
-    if (!Number.isFinite(n) || n < 0) {
-      return setError("Süre geçerli bir saniye değeri olmalı");
+    const payload = buildPayload();
+    if (payload === null) return;
+
+    // Fiziksel cihazı etkileyen komutlarda önce onay iste.
+    if (needsConfirm && !confirming) {
+      setConfirming(true);
+      return;
     }
 
     setSending(true);
@@ -79,11 +143,13 @@ export default function DeviceConfigPanel({
       const res = await fetch("/api/commands", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ device_id: deviceId, type, payload: { period: n } }),
+        body: JSON.stringify({ device_id: deviceId, type, payload }),
       });
       const json = await res.json();
       if (!json.success) throw new Error(json.error ?? "Komut gönderilemedi");
       setPeriod("");
+      setValue("");
+      setConfirming(false);
       onChanged();
     } catch (err) {
       setError(err instanceof Error ? err.message : "Bilinmeyen hata");
@@ -133,7 +199,7 @@ export default function DeviceConfigPanel({
             </span>
             <select
               value={type}
-              onChange={(e) => setType(e.target.value)}
+              onChange={(e) => handleTypeChange(e.target.value as CommandType)}
               className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
             >
               {TYPES.map((t) => (
@@ -155,22 +221,80 @@ export default function DeviceConfigPanel({
                 step="any"
                 min={0}
                 value={period}
-                onChange={(e) => setPeriod(e.target.value)}
+                onChange={(e) => {
+                  setPeriod(e.target.value);
+                  setConfirming(false);
+                }}
                 placeholder="örn. 120"
                 className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
               />
             </label>
           )}
+
+          {/* Sayacı/Deviri Ayarla: hedef değer girişi (cihaz register'a bu değeri yazar) */}
+          {needsValue && (
+            <label className="flex flex-col gap-1">
+              <span className="text-xs font-medium text-zinc-500">
+                {type === "set_counter" ? "Yeni sayaç değeri" : "Yeni devir değeri"}
+              </span>
+              <input
+                type="number"
+                step="any"
+                min={0}
+                value={value}
+                onChange={(e) => {
+                  setValue(e.target.value);
+                  setConfirming(false);
+                }}
+                placeholder="örn. 100"
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-sm text-zinc-900 shadow-sm focus:border-zinc-400 focus:outline-none dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-100"
+              />
+            </label>
+          )}
+
+          {/* Sıfırlama: giriş yok; yalnızca bilgi notu. */}
+          {(type === "reset_counter" || type === "reset_devir") && (
+            <p className="text-xs text-zinc-500">
+              {type === "reset_counter"
+                ? "Cihazın sayacı sıfırlanacak."
+                : "Cihazın devri sıfırlanacak."}
+            </p>
+          )}
+
           {error && (
             <p className="text-xs text-red-600 dark:text-red-400">{error}</p>
           )}
-          <button
-            type="submit"
-            disabled={sending}
-            className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
-          >
-            {sending ? "Gönderiliyor…" : "Gönder"}
-          </button>
+
+          {/* Fiziksel komutlarda iki adımlı onay; kalibrasyon tek adımda gider. */}
+          {needsConfirm && confirming ? (
+            <div className="flex items-center gap-2">
+              <span className="whitespace-nowrap text-xs text-zinc-500">
+                Cihaza gönderilsin mi?
+              </span>
+              <button
+                type="submit"
+                disabled={sending}
+                className="rounded-lg bg-red-600 px-3 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-red-700 disabled:opacity-50"
+              >
+                {sending ? "Gönderiliyor…" : "Evet, gönder"}
+              </button>
+              <button
+                type="button"
+                onClick={() => setConfirming(false)}
+                className="rounded-lg border border-zinc-300 bg-white px-3 py-2 text-xs font-medium text-zinc-700 shadow-sm transition hover:bg-zinc-50 dark:border-zinc-700 dark:bg-zinc-900 dark:text-zinc-300"
+              >
+                Vazgeç
+              </button>
+            </div>
+          ) : (
+            <button
+              type="submit"
+              disabled={sending}
+              className="self-start rounded-lg bg-zinc-900 px-4 py-2 text-xs font-semibold text-white shadow-sm transition hover:bg-zinc-700 disabled:opacity-50 dark:bg-zinc-100 dark:text-zinc-900 dark:hover:bg-zinc-300"
+            >
+              {sending ? "Gönderiliyor…" : "Gönder"}
+            </button>
+          )}
         </form>
 
         {/* Komut geçmişi */}

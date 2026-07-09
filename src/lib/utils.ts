@@ -27,6 +27,20 @@ export function normalizeDeviceId(
   return typeof raw === "string" ? raw.trim() : undefined;
 }
 
+// RSSI (dBm) → insan-okunur sinyal kalitesi etiketi ve renk sınıfı.
+// Cihaz signal_quality (0-100) göndermezse RSSI'dan kaba bir etiket türetmek için.
+export function rssiQuality(rssi: number | null | undefined): {
+  label: string;
+  colorClass: string;
+} {
+  if (rssi == null) return { label: "—", colorClass: "text-zinc-400" };
+  if (rssi >= -60) return { label: "Mükemmel", colorClass: "text-emerald-500" };
+  if (rssi >= -70) return { label: "İyi", colorClass: "text-emerald-500" };
+  if (rssi >= -80) return { label: "Orta", colorClass: "text-amber-500" };
+  if (rssi >= -90) return { label: "Zayıf", colorClass: "text-orange-500" };
+  return { label: "Çok zayıf", colorClass: "text-red-500" };
+}
+
 // Saniyeyi okunabilir süreye çevir: "2 sa 5 dk", "3 dk 20 sn", "45 sn".
 export function formatDuration(seconds: number): string {
   const s = Math.abs(Math.round(seconds));

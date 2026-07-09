@@ -87,15 +87,50 @@ export type CommandStatus =
   | "failed"
   | "cancelled";
 
-// device_commands tablosu satırı — kalibrasyon/konfig değişikliği kuyruğu.
+// Desteklenen komut tipleri. Hepsi aynı kuyruk/ACK yolunu kullanır; cihaz tipe
+// bakıp fiziksel register'ını (sayac/devir) değiştirir veya kalibrasyonu uygular.
+//  calibration   → payload {period}: cihaz süreden threshold/mid'i kendi çıkarır
+//  reset_counter → payload {}: cihaz sayacını sıfırlar
+//  reset_devir   → payload {}: cihaz devrini sıfırlar
+//  set_counter   → payload {value}: cihaz sayacını value'ya set eder
+//  set_devir     → payload {value}: cihaz devrini value'ya set eder
+export type CommandType =
+  | "calibration"
+  | "reset_counter"
+  | "reset_devir"
+  | "set_counter"
+  | "set_devir";
+
+// device_commands tablosu satırı — kalibrasyon/konfig/aktüasyon kuyruğu.
 export interface DeviceCommand {
   id: number;
   device_id: string;
-  type: string; // 'calibration' (ileride 'config' vb.)
-  payload: Record<string, number>; // cihazın anladığı anahtarlarla, ör. {"Threshold y": 10, "Mid y": 7}
+  type: CommandType; // bkz. CommandType (bilinmeyen değer DB'den ham string gelebilir)
+  payload: Record<string, number>; // tipe göre: {period} | {} | {value}
   status: CommandStatus;
   error: string | null; // ok=false ACK'inde cihazın hata mesajı
   created_at: string; // ISO timestamptz
   delivered_at: string | null;
   applied_at: string | null;
+}
+
+// device_health tablosu satırı — cihazın periyodik olarak bildirdiği sağlık verisi.
+// Zaman serisi (geçmiş); "anlık snapshot" en yeni satırdır.
+export interface DeviceHealth {
+  id: number;
+  device_id: string;
+  reported_at: string; // ISO timestamptz
+  uptime_sec: number | null; // cihazın açık kalma süresi (saniye)
+  rssi: number | null; // sinyal gücü (dBm, ör. -63)
+  signal_quality: number | null; // 0-100 (cihaz gönderir ya da UI'da RSSI'dan türetilir)
+  error: string | null; // hata durumu/mesajı (null = sorun yok)
+}
+
+// GET /api/devices/health yanıtı: en güncel satır + geçmiş + türetilmiş bağlantı durumu.
+export interface DeviceHealthResponse {
+  success: boolean;
+  latest: DeviceHealth | null;
+  history: DeviceHealth[]; // en yeni önce
+  online: boolean; // last_seen eşik içinde mi
+  last_seen_unix: number | null; // son okuma veya son sağlık raporundan büyük olanı
 }
