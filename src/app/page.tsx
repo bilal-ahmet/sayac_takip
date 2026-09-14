@@ -466,6 +466,7 @@ export default function Home() {
               latest={latest}
               readings={readings}
               commands={commands}
+              device={selectedDevice}
               onChanged={() => loadCommands(selected)}
             />
           )}

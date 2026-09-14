@@ -1,7 +1,12 @@
 "use client";
 
 import { useState } from "react";
-import type { DeviceCommand, MeterReading, CommandStatus } from "@/types";
+import type {
+  DeviceCommand,
+  MeterReading,
+  CommandStatus,
+  DeviceWithStats,
+} from "@/types";
 import { formatTimestamp } from "@/lib/utils";
 
 interface Props {
@@ -9,6 +14,7 @@ interface Props {
   latest: MeterReading | null;
   readings: MeterReading[]; // son okumalar (en yeni önce) — son "gerçek" threshold/mid için
   commands: DeviceCommand[];
+  device?: DeviceWithStats; // MQTT presence rozeti için (online / last_seen_at)
   onChanged: () => void; // başarılı komut sonrası listeyi tazelemek için
 }
 
@@ -24,9 +30,14 @@ const STATUS_STYLE: Record<CommandStatus, string> = {
   cancelled: "bg-zinc-100 text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400",
 };
 
+// MQTT'de komut retained mesaj olarak yayınlanır. Broker, mesajın cihaza ulaştığını
+// bildirmez — yalnızca kendisinin aldığını (PUBACK) bildirir. Bu yüzden:
+//   pending   = brokera yayınlanamadı, kuyrukta (broker erişilemez)
+//   delivered = broker aldı, retained mesaj brokerda bekliyor
+// "Cihaz gerçekten aldı mı?" sorusunun cevabı statü değil, cihazın çevrimiçi rozeti.
 const STATUS_LABEL: Record<CommandStatus, string> = {
-  pending: "bekliyor",
-  delivered: "iletildi",
+  pending: "gönderilemedi / kuyrukta",
+  delivered: "brokerda bekliyor",
   applied: "uygulandı",
   failed: "başarısız",
   cancelled: "iptal",
@@ -48,6 +59,7 @@ export default function DeviceConfigPanel({
   latest,
   readings,
   commands,
+  device,
   onChanged,
 }: Props) {
   // Cihaz threshold/mid'i her pakette anlamlı göndermez (çoğu pakette 0 gelir).
@@ -94,10 +106,11 @@ export default function DeviceConfigPanel({
 
   return (
     <div className="rounded-xl border border-zinc-200 bg-white shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-      <div className="border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
+      <div className="flex items-center justify-between gap-2 border-b border-zinc-200 px-4 py-3 dark:border-zinc-800">
         <h2 className="text-sm font-semibold text-zinc-700 dark:text-zinc-300">
           Kalibrasyon / Konfigürasyon
         </h2>
+        {device && <PresenceBadge device={device} />}
       </div>
 
       <div className="flex flex-col gap-4 p-4">
@@ -216,6 +229,31 @@ export default function DeviceConfigPanel({
         </div>
       </div>
     </div>
+  );
+}
+
+// Cihazın MQTT bağlantı durumu. Komut statüsü yalnızca brokera kadar olan yolu
+// gösterdiği için "cihaz gerçekten alabilir mi?" sorusunun cevabı burada.
+function PresenceBadge({ device }: { device: DeviceWithStats }) {
+  const seen = device.last_seen_at
+    ? formatTimestamp(Math.floor(new Date(device.last_seen_at).getTime() / 1000))
+    : null;
+
+  if (device.online) {
+    return (
+      <span className="shrink-0 rounded-full bg-emerald-100 px-2 py-0.5 text-xs font-medium text-emerald-700 dark:bg-emerald-950/50 dark:text-emerald-300">
+        çevrimiçi
+      </span>
+    );
+  }
+
+  return (
+    <span
+      className="shrink-0 rounded-full bg-zinc-100 px-2 py-0.5 text-xs font-medium text-zinc-500 dark:bg-zinc-800 dark:text-zinc-400"
+      title={seen ? `son görülme ${seen}` : "cihaz henüz MQTT ile bağlanmadı"}
+    >
+      {seen ? `çevrimdışı · ${seen}` : "bağlantı bilgisi yok"}
+    </span>
   );
 }
 

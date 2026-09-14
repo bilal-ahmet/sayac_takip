@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
+import { publishCommand } from "@/lib/mqtt";
 import type { DeviceCommand } from "@/types";
 
 // Dashboard geçmiş görünümünde dönen en fazla komut sayısı (egress tavanı).
@@ -93,9 +94,10 @@ export async function GET(request: NextRequest) {
 }
 
 // POST /api/commands — dashboard'dan kalibrasyon komutu oluştur (enqueue).
-// Gövde: { device_id, type?, payload: { "Threshold y": n, "Mid y": n } }
+// Gövde: { device_id, type?, payload: { period: n } }  (period = süre, saniye)
 // Aynı cihaz için bekleyen (pending/delivered) eski komutlar 'cancelled' yapılır;
-// böylece cihaz her zaman tek güncel hedefi alır.
+// böylece cihaz her zaman tek güncel hedefi alır. Yeni retained MQTT mesajı da
+// brokerdaki eskisini ezdiği için iki taraf aynı kuralı uygular.
 export async function POST(request: NextRequest) {
   let body: {
     device_id?: string;
@@ -185,7 +187,31 @@ export async function POST(request: NextRequest) {
     );
 
     await client.query("COMMIT");
-    return NextResponse.json({ success: true, command: inserted.rows[0] });
+
+    const command = inserted.rows[0];
+
+    // COMMIT'ten SONRA brokera retained olarak yayınla. Başarısız olursa komut
+    // 'pending' kalır ve bağlantı kurulduğunda süpürme onu yeniden yayınlar —
+    // bu yüzden broker kesintisi dashboard'a 500 döndürmez.
+    // Kendi try/catch'inde: transaction zaten COMMIT edildi, buradan çıkan bir
+    // hata aşağıdaki ROLLBACK yoluna düşmemeli.
+    let published = false;
+    try {
+      published = await publishCommand({
+        id: command.id,
+        device_id: command.device_id,
+        type: command.type,
+        payload: command.payload,
+        created_at: command.created_at,
+      });
+    } catch (err) {
+      console.error("Komut yayınlanamadı (pending kaldı):", err);
+    }
+
+    return NextResponse.json({
+      success: true,
+      command: published ? { ...command, status: "delivered" as const } : command,
+    });
   } catch (err) {
     await client.query("ROLLBACK");
     console.error("POST /api/commands hata:", err);

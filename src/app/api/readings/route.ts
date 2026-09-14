@@ -1,25 +1,23 @@
 import { NextRequest, NextResponse } from "next/server";
 import pool from "@/lib/db";
-import { normalizeDeviceId } from "@/lib/utils";
-import type { IncomingReading, MeterReading } from "@/types";
+import { isApiKeyValid } from "@/lib/auth";
+import { ingestReading } from "@/lib/ingest";
+import type { MeterReading } from "@/types";
 
 // POST /api/readings — IoT cihazdan okuma alır, delta hesaplar, kaydeder.
+// İş mantığı @/lib/ingest içindedir; MQTT yolu da aynı fonksiyonu çağırır.
 export async function POST(request: NextRequest) {
   // Opsiyonel güvenlik anahtarı doğrulaması (API_SECRET_KEY tanımlıysa).
-  const secret = process.env.API_SECRET_KEY;
-  if (secret) {
-    const provided = request.headers.get("x-api-key");
-    if (provided !== secret) {
-      return NextResponse.json(
-        { success: false, error: "Yetkisiz" },
-        { status: 401 }
-      );
-    }
+  if (!isApiKeyValid(request)) {
+    return NextResponse.json(
+      { success: false, error: "Yetkisiz" },
+      { status: 401 }
+    );
   }
 
-  let body: IncomingReading;
+  let body: unknown;
   try {
-    body = (await request.json()) as IncomingReading;
+    body = await request.json();
   } catch {
     return NextResponse.json(
       { success: false, error: "Geçersiz JSON" },
@@ -27,113 +25,28 @@ export async function POST(request: NextRequest) {
     );
   }
 
-  const deviceId = normalizeDeviceId(body);
-  const { timestamp, sayac, devir, baslangic } = body;
-  // toplam opsiyonel: sayı değilse null kaydedilir.
-  const toplam = typeof body.toplam === "number" ? body.toplam : null;
-  // period (geçen süre, saniye) opsiyonel: sayı değilse null kaydedilir.
-  const period = typeof body.period === "number" ? body.period : null;
-  // Cihazın süreden türetip bildirdiği güncel kalibrasyon değerleri (opsiyonel).
-  // Boşluklu anahtarlar "Device Id" deseniyle köşeli parantezle okunur.
-  const thresholdY =
-    typeof body["Threshold y"] === "number" ? body["Threshold y"] : null;
-  const midY = typeof body["Mid y"] === "number" ? body["Mid y"] : null;
-  // fw_version cihaz başına sabit bilgidir; okuma satırına değil devices'a yazılır.
-  const fwVersion =
-    typeof body.fw_version === "string" && body.fw_version.trim() !== ""
-      ? body.fw_version.trim()
-      : null;
+  const result = await ingestReading(body);
 
-  // Cihaz saati senkron mu? time_synced 0/false veya timestamp geçersiz/0 ise değil.
-  // Cihaz bu alanı integer (1/0) ya da boolean (true/false) gönderebilir; ikisi de
-  // desteklenir. Senkron değilse timestamp_unix'i sunucu kendi saatiyle ikame eder;
-  // böylece sıralama/delta/grafik mantığı 1970'e düşen bir kayıtla bozulmaz.
-  const synced =
-    body.time_synced !== 0 &&
-    body.time_synced !== false &&
-    typeof timestamp === "number" &&
-    timestamp > 0;
-  const effectiveTs = synced ? timestamp : Math.floor(Date.now() / 1000);
-
-  if (
-    !deviceId ||
-    typeof timestamp !== "number" ||
-    typeof sayac !== "number" ||
-    typeof devir !== "number" ||
-    typeof baslangic !== "number"
-  ) {
-    return NextResponse.json(
-      {
-        success: false,
-        error:
-          "Eksik veya hatalı alan: Device Id, timestamp, sayac, devir, baslangic zorunlu",
-      },
-      { status: 400 }
-    );
+  if (!result.ok) {
+    return result.error === "validation"
+      ? NextResponse.json({ success: false, error: result.detail }, { status: 400 })
+      : NextResponse.json(
+          { success: false, error: "Sunucu hatası" },
+          { status: 500 }
+        );
   }
 
-  const client = await pool.connect();
-  try {
-    await client.query("BEGIN");
-
-    // 1) Cihaz yoksa ekle; varsa firmware sürümünü güncelle (en son bildirilen).
-    //    fw_version null gelirse mevcut değer korunur (COALESCE).
-    //    RETURNING ile cihazın güncel fw_version'ını al: okuma satırında POST'ta
-    //    fw_version gelmezse buna düşülür (aşağıda düz parametre olarak kullanılır).
-    const dev = await client.query<{ fw_version: string | null }>(
-      `INSERT INTO devices (device_id, fw_version) VALUES ($1, $2)
-       ON CONFLICT (device_id)
-       DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)
-       RETURNING fw_version`,
-      [deviceId, fwVersion]
-    );
-    const effectiveFw = dev.rows[0]?.fw_version ?? null;
-
-    // 2) Bu cihazın son okumasını al (delta için).
-    const prev = await client.query<{ sayac: number; devir: number }>(
-      `SELECT sayac, devir
-       FROM meter_readings
-       WHERE device_id = $1
-       ORDER BY timestamp_unix DESC, id DESC
-       LIMIT 1`,
-      [deviceId]
-    );
-
-    // 3) Delta hesapla (ilk okumada null).
-    const sayacDelta =
-      prev.rows.length > 0 ? sayac - prev.rows[0].sayac : null;
-    const devirDelta =
-      prev.rows.length > 0 ? devir - prev.rows[0].devir : null;
-
-    // 4) Okumayı kaydet. fw_version okuma başına yazılır (aynı cihaz zamanla farklı
-    //    firmware'de okuma üretebilir; grafik versiyona göre süzülebilsin). POST'ta
-    //    fw_version gelmezse cihazın kayıtlı güncel sürümüne (effectiveFw) düşülür.
-    const inserted = await client.query<MeterReading>(
-      `INSERT INTO meter_readings
-         (device_id, timestamp_unix, sayac, devir, baslangic, toplam, period, threshold_y, mid_y, sayac_delta, devir_delta, time_synced, fw_version)
-       VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
-       RETURNING id`,
-      [deviceId, effectiveTs, sayac, devir, baslangic, toplam, period, thresholdY, midY, sayacDelta, devirDelta, synced, effectiveFw]
-    );
-
-    await client.query("COMMIT");
-
-    return NextResponse.json({
-      success: true,
-      id: inserted.rows[0].id,
-      sayac_delta: sayacDelta,
-      devir_delta: devirDelta,
-    });
-  } catch (err) {
-    await client.query("ROLLBACK");
-    console.error("POST /api/readings hata:", err);
-    return NextResponse.json(
-      { success: false, error: "Sunucu hatası" },
-      { status: 500 }
-    );
-  } finally {
-    client.release();
+  // Kopya (aynı msg_id): hata değil, cihaz yeniden denemesin diye başarı döner.
+  if (!result.inserted) {
+    return NextResponse.json({ success: true, duplicate: true });
   }
+
+  return NextResponse.json({
+    success: true,
+    id: result.id,
+    sayac_delta: result.sayac_delta,
+    devir_delta: result.devir_delta,
+  });
 }
 
 // Filtre modunda taranan satır sayısı için üst sınır (egress güvenlik tavanı).
@@ -294,20 +207,33 @@ export async function DELETE(request: NextRequest) {
     );
   }
 
+  const client = await pool.connect();
   try {
-    const result = await pool.query(
+    await client.query("BEGIN");
+    const result = await client.query(
       "DELETE FROM meter_readings WHERE device_id = $1",
       [deviceId]
     );
+    // Okumalar silindiğine göre cihazın özet sayaçları da sıfırlanmalı.
+    await client.query(
+      `UPDATE devices
+       SET reading_count = 0, last_timestamp_unix = NULL
+       WHERE device_id = $1`,
+      [deviceId]
+    );
+    await client.query("COMMIT");
     return NextResponse.json({
       success: true,
       deleted: result.rowCount,
     });
   } catch (err) {
+    await client.query("ROLLBACK");
     console.error("DELETE /api/readings hata:", err);
     return NextResponse.json(
       { success: false, error: "Sunucu hatası" },
       { status: 500 }
     );
+  } finally {
+    client.release();
   }
 }

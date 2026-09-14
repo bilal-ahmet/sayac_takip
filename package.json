@@ -6,9 +6,12 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
-    "lint": "eslint"
+    "lint": "eslint",
+    "sim:device": "node --env-file=.env.local scripts/sim-device.mjs",
+    "sim:listen": "node --env-file=.env.local scripts/sim-listen.mjs"
   },
   "dependencies": {
+    "mqtt": "^5.15.2",
     "next": "16.2.9",
     "pg": "^8.21.0",
     "react": "19.2.4",

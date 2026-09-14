@@ -15,6 +15,9 @@ export interface IncomingReading {
   "Threshold y"?: number;
   "Mid y"?: number;
   time_synced?: number | boolean; // cihaz saati NTP ile çekebildi mi? 1/true=evet, 0/false=hayır
+  // Cihaz başına monotonik artan mesaj sayacı (opsiyonel). MQTT QoS 1 en-az-bir-kez
+  // teslim ettiği için kopya okumaları ayırt etmekte kullanılır. Yoksa dedup kapalıdır.
+  msg_id?: number;
 }
 
 // devices tablosu satırı
@@ -22,8 +25,12 @@ export interface Device {
   id: number;
   device_id: string;
   name: string | null;
-  fw_version: string | null; // en son POST'ta bildirilen firmware sürümü
+  fw_version: string | null; // en son bildirilen firmware sürümü
   created_at: string; // ISO timestamptz
+  // MQTT presence: cihazın birth mesajı/LWT'sinden yazılır. MQTT'ye geçmemiş
+  // cihazlarda daima false kalır.
+  online: boolean;
+  last_seen_at: string | null; // ISO timestamptz
 }
 
 // /api/devices yanıtı: cihaz + son okuma özeti
@@ -53,6 +60,10 @@ export interface MeterReading {
   // Cihaz saati senkron muydu? false ise timestamp_unix sunucu saatiyle ikame
   // edilmiştir (cihaz timestamp=0 gönderdi). Dashboard'da rozetle işaretlenir.
   time_synced: boolean;
+  // Cihazın bildirdiği mesaj sayacı. Kopya okuma tespiti için; bildirmeyen ya da
+  // MQTT öncesi (HTTP) okumalarda null. Dashboard sorguları bu kolonu seçmez
+  // (gereksiz egress), o yüzden opsiyonel.
+  msg_id?: number | null;
   // Bir önceki (kronolojik) okumaya göre saniye farkı. Sunucuda LAG ile hesaplanır.
   // En eski satırda (öncesi yok) null gelir. Kopma tespitinde kullanılır.
   gap_sec?: number | null;
