@@ -18,7 +18,7 @@ ekleniyor ve taşıma katmanı değişiyor. JSON üreten kod olduğu gibi kullan
 | Client ID | Cihaz id'si = iki nokta olmadan MAC, ör. `188B0E88947C`. Bugünkü `"Device Id"` ile aynı. **Benzersiz olmak zorunda** — aynı clientId'li iki cihaz birbirini sonsuz döngüde düşürür. |
 | Clean session | **`true`.** Cihazın tek aboneliği *retained* bir topic olduğu için temiz oturumda da güncel komut bağlantı anında gelir. Böylece brokerda kalıcı oturum birikmez. |
 | Keepalive | **60 sn** (en fazla 120). |
-| Kimlik | Cihaz başına kullanıcı adı/şifre (ayrıca iletilecek). Asla loglanmayacak. |
+| Kimlik | **Tüm cihazlarda AYNI** kullanıcı adı/şifre (ayrıca iletilecek). Firmware'de sabit gömülebilir, cihaz başına farklılaşmaz. Asla loglanmayacak, seri porta basılmayacak. |
 
 ### Bağlantı açık tutulacak
 
@@ -216,11 +216,14 @@ Hata durumunda retry döngüsüne girilmez: bir kez bildirilir ve yeni komut bek
 
 ---
 
-## Netleştirilmesi gereken üç soru
+## Netleştirilmesi gereken dört soru
 
 1. **Bugünkü firmware TLS sertifikasını doğruluyor mu, yoksa `setInsecure()` mi
    çağırıyor?** Sahada `time_synced: 0` yaşanıyorsa ikincisi muhtemel — bu durumda
    bugün TLS hiçbir kimlik doğrulaması sağlamıyor demektir ve geçişle birlikte
    kapatılması gereken bir açık var.
 2. **Flash prosedürü NVS'i koruyor mu?** `msg_id`'nin doğruluğu buna bağlı.
-3. **`period` tam sayı mı bekleniyor?** Dashboard ondalıklı gönderebiliyor.
+3. **`period` ve `value` tam sayı mı bekleniyor?** Dashboard ondalıklı gönderebiliyor.
+4. **Flash okuma koruması (flash encryption / secure boot) açık mı?** Broker
+   kimliği tüm cihazlarda ortak olduğu için, tek bir cihazın flash'ından okunan
+   şifre tüm filoyu taklit etmeye yeter. Koruma açıksa bu risk büyük ölçüde kapanır.
