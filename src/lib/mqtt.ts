@@ -142,6 +142,11 @@ async function routeMessage(topic: string, payload: Buffer): Promise<void> {
   const { deviceId, kind } = parsed;
 
   if (kind === "status") {
+    // Boş payload = retained status TEMİZLENDİ, "cihaz çevrimdışı" DEĞİL.
+    // Cihaz silinirken clearDeviceTopics boş retained yayınlar; sunucu kendi
+    // +/status aboneliğinden bunu geri alır ve buradaki upsert cihazı yeni
+    // sildiğimiz halde tekrar yaratırdı.
+    if (payload.length === 0) return;
     await handleStatus(deviceId, payload.toString("utf8").trim());
     return;
   }
@@ -205,8 +210,14 @@ async function routeMessage(topic: string, payload: Buffer): Promise<void> {
 async function handleStatus(deviceId: string, value: string): Promise<void> {
   const online = value === "online";
   try {
+    // Upsert: birth mesajı cihazın ilk okumasından ÖNCE gelir, yani cihaz satırı
+    // henüz yoktur. Düz UPDATE burada 0 satır etkileyip sessizce kaybolur ve cihaz
+    // bir sonraki yeniden bağlanmaya kadar çevrimdışı görünür.
     await pool.query(
-      `UPDATE devices SET online = $2, last_seen_at = NOW() WHERE device_id = $1`,
+      `INSERT INTO devices (device_id, online, last_seen_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (device_id)
+       DO UPDATE SET online = EXCLUDED.online, last_seen_at = NOW()`,
       [deviceId, online]
     );
   } catch (err) {

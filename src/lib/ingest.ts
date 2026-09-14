@@ -264,15 +264,19 @@ export async function applyAck(raw: unknown): Promise<AckResult> {
   const newStatus = ok ? "applied" : "failed";
 
   try {
+    // applied_at için $1'i tekrar kullanmak yerine ayrı bir boolean parametre:
+    // aynı parametreyi hem status kolonuna atayıp hem string'le karşılaştırmak
+    // PostgreSQL 18'de "inconsistent types deduced for parameter" hatası veriyor
+    // (eski sürümler daha hoşgörülüydü, o yüzden bu hata uzun süre gizli kaldı).
     const result = await pool.query<{ status: string; type: CommandType }>(
       `UPDATE device_commands
        SET status = $1,
-           applied_at = CASE WHEN $1 = 'applied' THEN NOW() ELSE applied_at END,
-           error = $2
-       WHERE id = $3 AND device_id = $4
+           applied_at = CASE WHEN $2 THEN NOW() ELSE applied_at END,
+           error = $3
+       WHERE id = $4 AND device_id = $5
          AND status IN ('pending', 'delivered', 'failed')
        RETURNING status, type`,
-      [newStatus, errorMsg, commandId, deviceId]
+      [newStatus, ok, errorMsg, commandId, deviceId]
     );
 
     if (result.rowCount === 0) {
