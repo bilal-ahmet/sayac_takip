@@ -6,7 +6,9 @@
 //   node --env-file=.env.local scripts/sim-device.mjs --devices 5 --interval 5
 //
 // Senaryolar:
-//   live           sürekli periyodik okuma (varsayılan), komutlara ACK verir
+//   live           sürekli periyodik okuma (varsayılan) + 60 sn'de bir sağlık
+//                  raporu; gelen komutlara ACK verir
+//   health         tek sağlık raporu yayınlar
 //   duplicate      aynı msg_id ile 3 kez yayınlar → DB'de tam olarak 1 satır olmalı
 //   out-of-order   t=300, t=100, t=200 sırasıyla → delta zinciri sonunda doğru olmalı
 //   unsynced       timestamp:0, time_synced:0 → sunucu kendi saatini ikame etmeli
@@ -96,12 +98,12 @@ async function runDevice(deviceId) {
   // Birth mesajı (retained) — LWT'nin karşılığı.
   await publish(client, `${PREFIX}/${deviceId}/status`, "online", { retain: true });
 
-  // Retained komutu al ve ACK'le.
-  client.subscribe(`${PREFIX}/${deviceId}/cmd`, { qos: 1 });
+  // Retained komutları al ve ACK'le. Topic tip başına ayrı olduğu için wildcard.
+  client.subscribe(`${PREFIX}/${deviceId}/cmd/+`, { qos: 1 });
   client.on("message", async (topic, buf) => {
-    if (!topic.endsWith("/cmd")) return;
+    if (!topic.includes("/cmd/")) return;
     if (buf.length === 0) {
-      console.log(`[${deviceId}] komut temizlendi (boş retained)`);
+      console.log(`[${deviceId}] komut temizlendi (boş retained): ${topic}`);
       return;
     }
     const cmd = JSON.parse(buf.toString());
@@ -165,6 +167,17 @@ async function runDevice(deviceId) {
       console.log(`[${deviceId}] topic/payload uyuşmazlığı → reddedilmeli`);
       break;
     }
+    case "health": {
+      await publish(client, `${PREFIX}/${deviceId}/health`, {
+        "Device Id": deviceId,
+        uptime_sec: 86_400,
+        rssi: -63,
+        signal_quality: 74,
+        error: null,
+      });
+      console.log(`[${deviceId}] sağlık raporu yayınlandı`);
+      break;
+    }
     case "live":
     default: {
       const tick = async () => {
@@ -182,6 +195,19 @@ async function runDevice(deviceId) {
       };
       await tick();
       setInterval(tick, intervalSec * 1000);
+
+      // Sağlık raporu okumalardan çok daha seyrek gönderilir (her 60 sn).
+      setInterval(async () => {
+        await publish(client, `${PREFIX}/${deviceId}/health`, {
+          "Device Id": deviceId,
+          uptime_sec: Math.floor(process.uptime()),
+          rssi: -55 - Math.floor(Math.random() * 25),
+          signal_quality: 50 + Math.floor(Math.random() * 50),
+          error: null,
+        });
+        console.log(`[${deviceId}] sağlık raporu`);
+      }, 60_000);
+
       return; // süresiz çalışır
     }
   }

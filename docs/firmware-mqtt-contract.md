@@ -60,12 +60,22 @@ döner. `setBufferSize(512)` çağrılacak.
 | Topic | Yön | QoS | Retain | İçerik |
 |---|---|---|---|---|
 | `sayac/{id}/reading` | cihaz → sunucu | **1** | **false** | Okuma JSON'u (aşağıda) |
+| `sayac/{id}/health` | cihaz → sunucu | **1** | **false** | Periyodik sağlık raporu |
 | `sayac/{id}/ack` | cihaz → sunucu | **1** | **false** | Komut sonucu |
-| `sayac/{id}/cmd` | sunucu → cihaz | **1** | **true** | Güncel komut, boş payload = yok |
+| `sayac/{id}/cmd/{type}` | sunucu → cihaz | **1** | **true** | O tipteki güncel komut, boş payload = yok |
 | `sayac/{id}/status` | cihaz → sunucu | **1** | **true** | `online` / `offline` |
 
-`reading` ve `ack` **retain edilmeyecek** — retained olsalardı sunucu her yeniden
-bağlandığında eski okumayı/ACK'i tekrar işlerdi.
+`reading`, `health` ve `ack` **retain edilmeyecek** — retained olsalardı sunucu her
+yeniden bağlandığında eski mesajı tekrar işlerdi.
+
+**Komut topic'i neden tip başına ayrı:** Sunucuda her komut tipinin kendi bağımsız
+"tek güncel hedefi" var — bir `set_counter` göndermek bekleyen bir `calibration`'ı
+geçersiz kılmaz. Tek bir `cmd` topic'i kullanılsaydı yeni bir komut brokerdaki farklı
+tipteki komutu ezerdi. Cihaz tek bir wildcard aboneliğiyle hepsini alır:
+
+```
+sayac/{id}/cmd/+
+```
 
 ### Last Will (LWT)
 
@@ -139,27 +149,57 @@ bugün o okumalar tamamen kayıp. Kurallar:
 
 ---
 
+## Sağlık raporu
+
+Cihaz periyodik olarak (öneri: **60 saniyede bir**, okuma sıklığından çok daha seyrek)
+`sayac/{id}/health` topic'ine yayınlar:
+
+```json
+{"Device Id":"188B0E88947C","uptime_sec":86400,"rssi":-63,"signal_quality":74,"error":null}
+```
+
+Tüm alanlar `Device Id` dışında opsiyoneldir; sayı olmayan değerler `null` kaydedilir.
+`signal_quality` 0-100 aralığında; gönderilmezse arayüz RSSI'dan türetir.
+`error` sorun yokken `null`, varsa ≤1000 karakterlik mesaj.
+
+---
+
 ## Komut işleme
 
-Sunucu cihaza bir **`period` (süre, saniye)** gönderir; cihaz `Threshold y` / `Mid y`
-değerlerini bu süreden **kendisi türetir** ve sonraki okuma paketlerinde geri bildirir.
-Bu davranış bugünküyle aynı, değişmiyor.
+Beş komut tipi var. Hepsi aynı kuyruk/ACK yolunu kullanır:
 
-Gelen komut (`sayac/{id}/cmd`, retained):
+| `type` | `payload` | Cihaz ne yapar |
+|---|---|---|
+| `calibration` | `{"period": 120}` | Süreden `Threshold y` / `Mid y`'yi **kendisi türetir**, sonraki okuma paketlerinde geri bildirir (bugünkü davranış, değişmedi) |
+| `set_counter` | `{"value": 1500}` | Sayaç register'ını `value`'ya yazar |
+| `set_devir` | `{"value": 40}` | Devir register'ını `value`'ya yazar |
+| `reset_counter` | `{}` | Sayacı sıfırlar |
+| `reset_devir` | `{}` | Deviri sıfırlar |
+
+Gelen komut (`sayac/{id}/cmd/{type}`, retained):
 ```json
 {"command_id":42,"type":"calibration","payload":{"period":120},"created_at":"2026-09-14T10:00:00.000Z"}
 ```
 
-- Bağlantıdan hemen sonra abone olunur; retained mesaj (varsa) anında gelir.
-- **Boş (sıfır uzunlukta) payload = aktif komut yok**, hiçbir şey yapılmaz.
-- **`last_applied_command_id` NVS'te tutulur. `command_id` bu değerden küçük veya eşit
-  olan komut yok sayılır.** Retained komutu cihaz tarafında idempotent yapan mekanizma
-  budur: reboot döngüsü komutu tekrar uygulamaz, sunucunun temizlemeyi kaçırdığı bir
-  retained mesaj zararsız kalır. **Bu olmadan**, geri dönüştürülmüş MAC'li bir cihaz
-  ilk boot'ta bir yıllık kalibrasyonu uygular.
-- Uygulandıktan sonra: önce `last_applied_command_id` yazılır, sonra ACK yayınlanır.
-- `period` JSON **sayı** ve **ondalıklı gelebilir** (dashboard yalnızca sonlu sayı
-  kontrolü yapıyor). Yuvarlanacak ya da reddedilecek; tam sayı varsayılmayacak.
+- Bağlantıdan hemen sonra `sayac/{id}/cmd/+`'e abone olunur; retained mesajlar
+  (varsa, birden fazla tip olabilir) anında gelir.
+- **Boş (sıfır uzunlukta) payload = o tipte aktif komut yok**, hiçbir şey yapılmaz.
+- ⚠️ **`last_applied_command_id` TİP BAŞINA ayrı tutulur** (NVS'te 5 ayrı değer).
+  Gelen komutun `command_id`'si o tipin kayıtlı değerinden küçük veya eşitse yok
+  sayılır. **Tek bir global değer kullanmak hatalıdır**: `command_id` tüm tipler için
+  ortak bir sayaçtan gelir, yani cihaz `calibration` id=50'yi uyguladıktan sonra
+  brokerda bekleyen `set_counter` id=48'i sessizce yok sayardı.
+- Bu mekanizma retained komutu cihaz tarafında idempotent yapar: reboot döngüsü komutu
+  tekrar uygulamaz, sunucunun temizlemeyi kaçırdığı bir retained mesaj zararsız kalır.
+  **Bu olmadan**, geri dönüştürülmüş MAC'li bir cihaz ilk boot'ta bir yıllık
+  kalibrasyonu uygular.
+- Uygulandıktan sonra: önce o tipin `last_applied_command_id`'si yazılır, sonra ACK
+  yayınlanır.
+- `period` ve `value` JSON **sayı** ve **ondalıklı gelebilir** (dashboard yalnızca
+  sonlu ve `>= 0` kontrolü yapıyor). Yuvarlanacak ya da reddedilecek; tam sayı
+  varsayılmayacak.
+- `set_*` ve `reset_*` fiziksel register'ı değiştirir; dashboard bunlar için iki adımlı
+  onay istiyor ama cihaz tarafında ek bir koruma beklenmiyor.
 
 ### ACK
 

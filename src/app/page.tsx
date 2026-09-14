@@ -17,12 +17,18 @@ import TimelineView from "@/components/TimelineView";
 import ReadingsFilters, { type DeltaCol } from "@/components/ReadingsFilters";
 import GapReport from "@/components/GapReport";
 import DeviceConfigPanel from "@/components/DeviceConfigPanel";
+import DeviceHealthPanel from "@/components/DeviceHealthPanel";
 
 const REFRESH_MS = 5_000;
+
+// Ana görünüm sekmeleri: okuma/analiz paneli vs. cihaz sağlık paneli.
+type View = "dashboard" | "health";
 
 export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
   const [selected, setSelected] = useState<string | null>(null);
+  // Aktif sekme (varsayılan: dashboard).
+  const [view, setView] = useState<View>("dashboard");
   // Firmware versiyon filtresi (null = tümü). Seçili cihazın okumalarını versiyona
   // göre süzer (cihazı değiştirmez); grafik/tablo/kartlar o versiyonu gösterir.
   const [versionFilter, setVersionFilter] = useState<string | null>(null);
@@ -322,13 +328,15 @@ export default function Home() {
           </p>
         </div>
         <div className="flex items-end gap-3">
-          {/* Firmware seçici her zaman görünür: en üstte "Tüm veriler", altında
+          {/* Firmware seçici yalnızca okuma panelinde: en üstte "Tüm veriler", altında
               cihazın okumalarında geçen sürümler (hiç sürüm yoksa yalnız "Tüm veriler"). */}
-          <VersionFilter
-            versions={deviceVersions}
-            selected={versionFilter}
-            onSelect={handleVersionChange}
-          />
+          {view === "dashboard" && (
+            <VersionFilter
+              versions={deviceVersions}
+              selected={versionFilter}
+              onSelect={handleVersionChange}
+            />
+          )}
           <DeviceSelector
             devices={devices}
             selected={selected}
@@ -340,8 +348,8 @@ export default function Home() {
               clearFilters();
             }}
           />
-          {/* Sıfırlama butonu — iki adımlı onay */}
-          {selected && (
+          {/* Sıfırlama butonu — iki adımlı onay (yalnızca okuma paneli) */}
+          {view === "dashboard" && selected && (
             confirmReset === selected ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-500 whitespace-nowrap">Emin misin?</span>
@@ -369,8 +377,8 @@ export default function Home() {
               </button>
             )
           )}
-          {/* Cihazı Sil butonu — iki adımlı onay */}
-          {selected && (
+          {/* Cihazı Sil butonu — iki adımlı onay (yalnızca okuma paneli) */}
+          {view === "dashboard" && selected && (
             confirmDeleteDevice === selected ? (
               <div className="flex items-center gap-2">
                 <span className="text-xs text-zinc-500 whitespace-nowrap">
@@ -402,12 +410,40 @@ export default function Home() {
         </div>
       </header>
 
+      {/* Sekme çubuğu: Okuma Paneli · Cihaz Sağlığı */}
+      <nav className="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
+        {([
+          { key: "dashboard", label: "Okuma Paneli" },
+          { key: "health", label: "Cihaz Sağlığı" },
+        ] as const).map((t) => (
+          <button
+            key={t.key}
+            onClick={() => setView(t.key)}
+            className={`-mb-px border-b-2 px-4 py-2 text-sm font-medium transition ${
+              view === t.key
+                ? "border-zinc-900 text-zinc-900 dark:border-zinc-100 dark:text-zinc-100"
+                : "border-transparent text-zinc-500 hover:text-zinc-700 dark:hover:text-zinc-300"
+            }`}
+          >
+            {t.label}
+          </button>
+        ))}
+      </nav>
+
       {error && (
         <div className="mb-6 rounded-lg border border-red-300 bg-red-50 px-4 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950 dark:text-red-300">
           {error}
         </div>
       )}
 
+      {view === "health" ? (
+        selected ? (
+          <DeviceHealthPanel deviceId={selected} />
+        ) : (
+          <p className="text-sm text-zinc-400">Cihaz seçin.</p>
+        )
+      ) : (
+      <>
       {/* Özet kartlar */}
       <section className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">
         <StatsCard
@@ -474,6 +510,8 @@ export default function Home() {
           <GapReport gaps={gaps} timeoutSec={timeoutSec} />
         </div>
       </section>
+      </>
+      )}
     </div>
   );
 }

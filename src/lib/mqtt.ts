@@ -1,7 +1,14 @@
 import mqtt, { type MqttClient, type IClientOptions } from "mqtt";
 import pool from "@/lib/db";
-import { ingestReading, applyAck } from "@/lib/ingest";
-import { cmdTopic, statusTopic, parseTopic, subscriptions } from "@/lib/topics";
+import { ingestReading, ingestHealth, applyAck } from "@/lib/ingest";
+import {
+  cmdTopic,
+  statusTopic,
+  allCmdTopics,
+  parseTopic,
+  subscriptions,
+} from "@/lib/topics";
+import type { CommandType } from "@/types";
 
 // Sunucunun kalıcı MQTT bağlantısı. Railway'de `next start` uzun ömürlü tek bir
 // Node process'i olduğu için istemci doğrudan uygulamanın içinde yaşar; ayrı bir
@@ -139,13 +146,23 @@ async function routeMessage(topic: string, payload: Buffer): Promise<void> {
     return;
   }
 
-  if (kind === "cmd") return; // sunucunun kendi yayını; yok say
-
   let body: unknown;
   try {
     body = JSON.parse(payload.toString("utf8"));
   } catch {
     console.warn(`MQTT geçersiz JSON (${topic})`);
+    return;
+  }
+
+  if (kind === "health") {
+    const result = await ingestHealth(body, { topicDeviceId: deviceId });
+    if (!result.ok) {
+      console.warn(
+        `MQTT sağlık raporu reddedildi (${deviceId}): ${
+          result.error === "validation" ? result.detail : "sunucu hatası"
+        }`
+      );
+    }
     return;
   }
 
@@ -177,10 +194,11 @@ async function routeMessage(topic: string, payload: Buffer): Promise<void> {
     );
     return;
   }
-  if (ack.status === "applied") {
-    // Komut kapandı: retained mesajı temizle ki cihaz yeniden bağlandığında
-    // aynı komutu tekrar almasın.
-    await clearRetainedCommand(deviceId);
+  if (ack.status === "applied" && ack.type) {
+    // Komut kapandı: o TİPİN retained mesajını temizle ki cihaz yeniden
+    // bağlandığında aynı komutu tekrar almasın. Diğer tiplerin bekleyen
+    // komutlarına dokunulmaz.
+    await clearRetainedCommand(deviceId, ack.type);
   }
 }
 
@@ -231,14 +249,15 @@ function publishAsync(
 export interface CommandToPublish {
   id: number;
   device_id: string;
-  type: string;
+  type: CommandType;
   payload: Record<string, number>;
   created_at: string;
 }
 
 // Komutu retained olarak yayınla ve başarılıysa 'delivered' işaretle.
-// Retained olması poll'ün yerini tutar: cihaz abone olduğu anda güncel komutu alır,
-// ve yeni bir retained mesaj eskisini ezer (tek güncel hedef kuralının karşılığı).
+// Retained olması poll'ün yerini tutar: cihaz abone olduğu anda güncel komutu alır.
+// Topic tip başına ayrı olduğu için yeni bir komut yalnızca KENDİ tipinin retained
+// mesajını ezer — device_commands'taki tip-başına-iptal kuralıyla birebir aynı.
 export async function publishCommand(cmd: CommandToPublish): Promise<boolean> {
   const client = getMqttClient();
   if (!client) return false;
@@ -250,7 +269,7 @@ export async function publishCommand(cmd: CommandToPublish): Promise<boolean> {
     created_at: cmd.created_at,
   });
 
-  const ok = await publishAsync(client, cmdTopic(cmd.device_id), body, {
+  const ok = await publishAsync(client, cmdTopic(cmd.device_id, cmd.type), body, {
     retain: true,
     expirySec: COMMAND_EXPIRY_SEC,
   });
@@ -269,18 +288,25 @@ export async function publishCommand(cmd: CommandToPublish): Promise<boolean> {
   return true;
 }
 
-// Retained komutu temizle (boş payload = aktif komut yok).
-export async function clearRetainedCommand(deviceId: string): Promise<void> {
+// Bir tipin retained komutunu temizle (boş payload = o tipte aktif komut yok).
+export async function clearRetainedCommand(
+  deviceId: string,
+  type: CommandType
+): Promise<void> {
   const client = getMqttClient();
   if (!client) return;
-  await publishAsync(client, cmdTopic(deviceId), "", { retain: true });
+  await publishAsync(client, cmdTopic(deviceId, type), "", { retain: true });
 }
 
-// Cihaz silinirken brokerdaki tüm retained izlerini temizle.
+// Cihaz silinirken brokerdaki tüm retained izlerini temizle: her komut tipinin
+// topic'i + status. Aksi halde aynı MAC'le gelen yeni bir cihaz ilk bağlantısında
+// eski komutları alır.
 export async function clearDeviceTopics(deviceId: string): Promise<void> {
   const client = getMqttClient();
   if (!client) return;
-  await publishAsync(client, cmdTopic(deviceId), "", { retain: true });
+  for (const topic of allCmdTopics(deviceId)) {
+    await publishAsync(client, topic, "", { retain: true });
+  }
   await publishAsync(client, statusTopic(deviceId), "", { retain: true });
 }
 

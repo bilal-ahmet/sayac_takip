@@ -49,6 +49,9 @@ export async function DELETE(request: NextRequest) {
     await client.query("DELETE FROM device_commands WHERE device_id = $1", [
       deviceId,
     ]);
+    await client.query("DELETE FROM device_health WHERE device_id = $1", [
+      deviceId,
+    ]);
     const result = await client.query(
       "DELETE FROM devices WHERE device_id = $1",
       [deviceId]

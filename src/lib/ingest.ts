@@ -1,6 +1,6 @@
 import pool from "@/lib/db";
 import { normalizeDeviceId } from "@/lib/utils";
-import type { IncomingReading } from "@/types";
+import type { IncomingReading, CommandType } from "@/types";
 
 // Transport'tan bağımsız ingest çekirdeği. Hem HTTP route'ları hem MQTT mesaj
 // yönlendiricisi bu iki fonksiyonu çağırır; böylece iki yolun ürettiği satırlar
@@ -26,7 +26,15 @@ export type AckResult =
       status: "applied" | "failed" | "ignored";
       device_id: string;
       command_id: number;
+      // Kapanan komutun tipi. Retained komut topic'i tip başına ayrı olduğu için
+      // ACK sonrası doğru topic'i temizlemek buna bağlı. "ignored"da yoktur.
+      type?: CommandType;
     }
+  | { ok: false; error: "validation"; detail: string }
+  | { ok: false; error: "server" };
+
+export type HealthResult =
+  | { ok: true; device_id: string }
   | { ok: false; error: "validation"; detail: string }
   | { ok: false; error: "server" };
 
@@ -256,14 +264,14 @@ export async function applyAck(raw: unknown): Promise<AckResult> {
   const newStatus = ok ? "applied" : "failed";
 
   try {
-    const result = await pool.query<{ status: string }>(
+    const result = await pool.query<{ status: string; type: CommandType }>(
       `UPDATE device_commands
        SET status = $1,
            applied_at = CASE WHEN $1 = 'applied' THEN NOW() ELSE applied_at END,
            error = $2
        WHERE id = $3 AND device_id = $4
          AND status IN ('pending', 'delivered', 'failed')
-       RETURNING status`,
+       RETURNING status, type`,
       [newStatus, errorMsg, commandId, deviceId]
     );
 
@@ -278,9 +286,80 @@ export async function applyAck(raw: unknown): Promise<AckResult> {
       status: result.rows[0].status as "applied" | "failed",
       device_id: deviceId,
       command_id: commandId,
+      type: result.rows[0].type,
     };
   } catch (err) {
     console.error("applyAck hata:", err);
     return { ok: false, error: "server" };
+  }
+}
+
+interface HealthBody {
+  device_id?: string;
+  "Device Id"?: string;
+  uptime_sec?: unknown;
+  rssi?: unknown;
+  signal_quality?: unknown;
+  error?: unknown;
+}
+
+// Cihazın periyodik sağlık raporunu kaydet (uptime, sinyal, hata durumu).
+// Bilinmeyen cihaz otomatik oluşturulur (okuma yoluyla aynı davranış).
+export async function ingestHealth(
+  raw: unknown,
+  opts?: { topicDeviceId?: string }
+): Promise<HealthResult> {
+  if (typeof raw !== "object" || raw === null) {
+    return { ok: false, error: "validation", detail: "Gövde bir JSON nesnesi olmalı" };
+  }
+  const body = raw as HealthBody;
+
+  const rawId = body.device_id ?? body["Device Id"];
+  const deviceId = typeof rawId === "string" ? rawId.trim() : undefined;
+  if (!deviceId) {
+    return { ok: false, error: "validation", detail: "Device Id zorunlu" };
+  }
+
+  if (opts?.topicDeviceId && opts.topicDeviceId !== deviceId) {
+    return {
+      ok: false,
+      error: "validation",
+      detail: `Topic cihaz id'si (${opts.topicDeviceId}) payload'daki id ile uyuşmuyor (${deviceId})`,
+    };
+  }
+
+  // Sayısal alanlar: sayı ve sonluysa alınır, aksi halde null kaydedilir.
+  const num = (v: unknown): number | null =>
+    typeof v === "number" && Number.isFinite(v) ? v : null;
+  const uptimeSec = num(body.uptime_sec);
+  const rssi = num(body.rssi);
+  const signalQuality = num(body.signal_quality);
+  const errorMsg =
+    typeof body.error === "string" && body.error.trim() !== ""
+      ? body.error.slice(0, 1000)
+      : null;
+
+  const client = await pool.connect();
+  try {
+    await client.query("BEGIN");
+    await client.query(
+      `INSERT INTO devices (device_id) VALUES ($1)
+       ON CONFLICT (device_id) DO NOTHING`,
+      [deviceId]
+    );
+    await client.query(
+      `INSERT INTO device_health
+         (device_id, uptime_sec, rssi, signal_quality, error)
+       VALUES ($1, $2, $3, $4, $5)`,
+      [deviceId, uptimeSec, rssi, signalQuality, errorMsg]
+    );
+    await client.query("COMMIT");
+    return { ok: true, device_id: deviceId };
+  } catch (err) {
+    await client.query("ROLLBACK");
+    console.error("ingestHealth hata:", err);
+    return { ok: false, error: "server" };
+  } finally {
+    client.release();
   }
 }
