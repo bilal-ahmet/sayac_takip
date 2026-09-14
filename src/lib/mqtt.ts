@@ -1,6 +1,6 @@
 import mqtt, { type MqttClient, type IClientOptions } from "mqtt";
 import pool from "@/lib/db";
-import { ingestReading, ingestHealth, applyAck } from "@/lib/ingest";
+import { ingestReading, ingestHealth, applyAck, strictDevices } from "@/lib/ingest";
 import {
   cmdTopic,
   statusTopic,
@@ -210,6 +210,14 @@ async function routeMessage(topic: string, payload: Buffer): Promise<void> {
 async function handleStatus(deviceId: string, value: string): Promise<void> {
   const online = value === "online";
   try {
+    if (strictDevices()) {
+      // Katı modda status mesajı cihaz oluşturmaz; tanımsız cihaz sessizce yok sayılır.
+      await pool.query(
+        `UPDATE devices SET online = $2, last_seen_at = NOW() WHERE device_id = $1`,
+        [deviceId, online]
+      );
+      return;
+    }
     // Upsert: birth mesajı cihazın ilk okumasından ÖNCE gelir, yani cihaz satırı
     // henüz yoktur. Düz UPDATE burada 0 satır etkileyip sessizce kaybolur ve cihaz
     // bir sonraki yeniden bağlanmaya kadar çevrimdışı görünür.

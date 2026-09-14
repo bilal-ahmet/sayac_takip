@@ -18,6 +18,7 @@ import ReadingsFilters, { type DeltaCol } from "@/components/ReadingsFilters";
 import GapReport from "@/components/GapReport";
 import DeviceConfigPanel from "@/components/DeviceConfigPanel";
 import DeviceHealthPanel from "@/components/DeviceHealthPanel";
+import DeviceAdmin from "@/components/DeviceAdmin";
 
 const REFRESH_MS = 5_000;
 
@@ -346,6 +347,19 @@ export default function Home() {
               setConfirmReset(null);
               setConfirmDeleteDevice(null);
               clearFilters();
+            }}
+          />
+          <DeviceAdmin
+            selectedDevice={selectedDevice}
+            onChanged={async (createdId) => {
+              await loadDevices();
+              if (createdId) {
+                setSelected(createdId);
+                setVersionFilter(null);
+                setConfirmReset(null);
+                setConfirmDeleteDevice(null);
+                clearFilters();
+              }
             }}
           />
           {/* Sıfırlama butonu — iki adımlı onay (yalnızca okuma paneli) */}

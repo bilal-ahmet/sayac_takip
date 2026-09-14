@@ -26,6 +26,114 @@ export async function GET() {
   }
 }
 
+// device_id VARCHAR(20); cihazın gönderdiği "Device Id" ile BİREBİR eşleşmeli.
+const DEVICE_ID_RE = /^[A-Za-z0-9:_-]{1,20}$/;
+// name VARCHAR(100)
+const NAME_MAX = 100;
+
+function parseName(v: unknown): string | null {
+  return typeof v === "string" && v.trim() !== "" ? v.trim().slice(0, NAME_MAX) : null;
+}
+
+// POST /api/devices — arayüzden cihaz oluştur.
+// Gövde: { device_id, name? }
+// Cihazlar okuma geldiğinde de otomatik oluşur; bu uç, cihazı önceden tanımlayıp
+// isim vermek için. MQTT_STRICT_DEVICES=1 iken otomatik oluşturma kapanır ve
+// provizyon yalnızca buradan yapılır.
+export async function POST(request: NextRequest) {
+  let body: { device_id?: unknown; name?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Geçersiz JSON" },
+      { status: 400 }
+    );
+  }
+
+  const raw = body.device_id;
+  const deviceId = typeof raw === "string" ? raw.trim() : "";
+  if (!DEVICE_ID_RE.test(deviceId)) {
+    return NextResponse.json(
+      {
+        success: false,
+        error:
+          "device_id 1-20 karakter olmalı ve yalnızca harf, rakam, : _ - içerebilir",
+      },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const result = await pool.query<{ device_id: string }>(
+      `INSERT INTO devices (device_id, name) VALUES ($1, $2)
+       ON CONFLICT (device_id) DO NOTHING
+       RETURNING device_id`,
+      [deviceId, parseName(body.name)]
+    );
+
+    if (result.rowCount === 0) {
+      return NextResponse.json(
+        { success: false, error: `Bu cihaz zaten kayıtlı: ${deviceId}` },
+        { status: 409 }
+      );
+    }
+
+    return NextResponse.json({ success: true, device_id: deviceId });
+  } catch (err) {
+    console.error("POST /api/devices hata:", err);
+    return NextResponse.json(
+      { success: false, error: "Sunucu hatası" },
+      { status: 500 }
+    );
+  }
+}
+
+// PATCH /api/devices — cihazın görünen adını değiştir.
+// Gövde: { device_id, name }  (name boş/null → isim kaldırılır)
+export async function PATCH(request: NextRequest) {
+  let body: { device_id?: unknown; name?: unknown };
+  try {
+    body = await request.json();
+  } catch {
+    return NextResponse.json(
+      { success: false, error: "Geçersiz JSON" },
+      { status: 400 }
+    );
+  }
+
+  const raw = body.device_id;
+  const deviceId = typeof raw === "string" ? raw.trim() : "";
+  if (!deviceId) {
+    return NextResponse.json(
+      { success: false, error: "device_id zorunlu" },
+      { status: 400 }
+    );
+  }
+
+  try {
+    const result = await pool.query(
+      `UPDATE devices SET name = $2 WHERE device_id = $1`,
+      [deviceId, parseName(body.name)]
+    );
+
+    if (result.rowCount === 0) {
+      return NextResponse.json(
+        { success: false, error: "Cihaz bulunamadı" },
+        { status: 404 }
+      );
+    }
+
+    return NextResponse.json({ success: true });
+  } catch (err) {
+    console.error("PATCH /api/devices hata:", err);
+    return NextResponse.json(
+      { success: false, error: "Sunucu hatası" },
+      { status: 500 }
+    );
+  }
+}
+
 // DELETE /api/devices?device_id=... — cihazı ve tüm okumalarını siler.
 export async function DELETE(request: NextRequest) {
   const deviceId = request.nextUrl.searchParams.get("device_id");

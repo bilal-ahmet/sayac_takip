@@ -33,6 +33,14 @@ export type AckResult =
   | { ok: false; error: "validation"; detail: string }
   | { ok: false; error: "server" };
 
+// MQTT_STRICT_DEVICES=1 → cihazlar YALNIZCA arayüzden (POST /api/devices) oluşturulur;
+// bilinmeyen bir device_id'den gelen veri reddedilir. Paylaşımlı broker kimliği
+// kullandığımız için provizyonu açık bir eyleme dönüştürmek gerçek bir koruma sağlar.
+// Varsayılan kapalı: cihaz ilk veri gönderdiğinde otomatik oluşur (eski davranış).
+export function strictDevices(): boolean {
+  return process.env.MQTT_STRICT_DEVICES === "1";
+}
+
 export type HealthResult =
   | { ok: true; device_id: string }
   | { ok: false; error: "validation"; detail: string }
@@ -123,13 +131,30 @@ export async function ingestReading(
     // 1) Cihaz yoksa ekle; varsa firmware sürümünü güncelle (en son bildirilen).
     //    fw_version null gelirse mevcut değer korunur (COALESCE). RETURNING ile
     //    cihazın güncel sürümü alınır; okuma satırı bunu kullanır.
-    const dev = await client.query<{ fw_version: string | null }>(
-      `INSERT INTO devices (device_id, fw_version) VALUES ($1, $2)
-       ON CONFLICT (device_id)
-       DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)
-       RETURNING fw_version`,
-      [deviceId, fwVersion]
-    );
+    const dev = strictDevices()
+      ? // Katı mod: cihaz önceden tanımlı olmalı, oluşturulmaz.
+        await client.query<{ fw_version: string | null }>(
+          `UPDATE devices SET fw_version = COALESCE($2, fw_version)
+           WHERE device_id = $1
+           RETURNING fw_version`,
+          [deviceId, fwVersion]
+        )
+      : await client.query<{ fw_version: string | null }>(
+          `INSERT INTO devices (device_id, fw_version) VALUES ($1, $2)
+           ON CONFLICT (device_id)
+           DO UPDATE SET fw_version = COALESCE(EXCLUDED.fw_version, devices.fw_version)
+           RETURNING fw_version`,
+          [deviceId, fwVersion]
+        );
+
+    if (dev.rowCount === 0) {
+      await client.query("ROLLBACK");
+      return {
+        ok: false,
+        error: "validation",
+        detail: `Tanımsız cihaz: ${deviceId} (MQTT_STRICT_DEVICES açık, önce arayüzden ekleyin)`,
+      };
+    }
     const effectiveFw = dev.rows[0]?.fw_version ?? null;
 
     // 2) Öncül okuma = gelen timestamp'ten küçük-eşit EN YENİ satır.
@@ -346,11 +371,26 @@ export async function ingestHealth(
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
-    await client.query(
-      `INSERT INTO devices (device_id) VALUES ($1)
-       ON CONFLICT (device_id) DO NOTHING`,
-      [deviceId]
-    );
+    if (strictDevices()) {
+      const exists = await client.query(
+        "SELECT 1 FROM devices WHERE device_id = $1",
+        [deviceId]
+      );
+      if (exists.rowCount === 0) {
+        await client.query("ROLLBACK");
+        return {
+          ok: false,
+          error: "validation",
+          detail: `Tanımsız cihaz: ${deviceId} (MQTT_STRICT_DEVICES açık, önce arayüzden ekleyin)`,
+        };
+      }
+    } else {
+      await client.query(
+        `INSERT INTO devices (device_id) VALUES ($1)
+         ON CONFLICT (device_id) DO NOTHING`,
+        [deviceId]
+      );
+    }
     await client.query(
       `INSERT INTO device_health
          (device_id, uptime_sec, rssi, signal_quality, error)
