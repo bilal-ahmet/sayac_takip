@@ -12,13 +12,14 @@ ekleniyor ve taşıma katmanı değişiyor. JSON üreten kod olduğu gibi kullan
 
 | | |
 |---|---|
-| Host | `<cluster>.s1.<region>.hivemq.cloud` |
+| Host | `15d41dceb5b34496be99e908653f3cdf.s1.eu.hivemq.cloud` |
 | Port | **8883, yalnızca TLS.** HiveMQ Cloud'da şifresiz 1883 portu yoktur. |
 | Protokol | **MQTT 3.1.1 yeterli.** MQTT 5 gerekmiyor. |
 | Client ID | Cihaz id'si = iki nokta olmadan MAC, ör. `188B0E88947C`. Bugünkü `"Device Id"` ile aynı. **Benzersiz olmak zorunda** — aynı clientId'li iki cihaz birbirini sonsuz döngüde düşürür. |
 | Clean session | **`true`.** Cihazın tek aboneliği *retained* bir topic olduğu için temiz oturumda da güncel komut bağlantı anında gelir. Böylece brokerda kalıcı oturum birikmez. |
 | Keepalive | **60 sn** (en fazla 120). |
-| Kimlik | **Tüm cihazlarda AYNI** kullanıcı adı/şifre (ayrıca iletilecek). Firmware'de sabit gömülebilir, cihaz başına farklılaşmaz. Asla loglanmayacak, seri porta basılmayacak. |
+| Kullanıcı adı | `sayac-device` — tüm cihazlarda aynı. |
+| Şifre | **Ayrıca iletilecek** (bu dosyaya yazılmaz; repo git'te takipli). Firmware'de sabit gömülebilir, cihaz başına farklılaşmaz. Asla loglanmayacak, seri porta basılmayacak. |
 
 ### Bağlantı açık tutulacak
 
