@@ -283,3 +283,13 @@ export interface RegistrySearchResponse {
   results: RegistrySearchResult[];
   devices: { device_id: string; name: string | null }[];
 }
+
+// GET /api/registry/periods?device_id= — bir cihazın kurulum dönemleri.
+// Okuma paneli bunu grafikteki sınır çizgileri ve "bu okuma hangi sayaca ait"
+// atfı için kullanır. Kasten küçük tutuldu; cihaz değişiminde çekilir, poll edilmez.
+export interface InstallationPeriod {
+  installation_id: number;
+  started_at: string;
+  ended_at: string | null; // NULL = hâlâ açık
+  serial_no: string;
+}

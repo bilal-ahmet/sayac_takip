@@ -1,4 +1,9 @@
-import type { IncomingReading, MeterReading, Gap } from "@/types";
+import type {
+  IncomingReading,
+  MeterReading,
+  Gap,
+  InstallationPeriod,
+} from "@/types";
 
 // Unix timestamp (saniye) → Türkiye saati (Europe/Istanbul), tr-TR biçimi.
 export function formatTimestamp(unix: number): string {
@@ -106,7 +111,10 @@ export function computeGaps(
 }
 
 // Okumaları CSV string'e çevir (başlık + satırlar).
-export function readingsToCSV(readings: MeterReading[]): string {
+export function readingsToCSV(
+  readings: MeterReading[],
+  periods: InstallationPeriod[] = []
+): string {
   const headers = [
     "Zaman",
     "timestamp_unix",
@@ -120,6 +128,10 @@ export function readingsToCSV(readings: MeterReading[]): string {
     "sayac_delta",
     "devir_delta",
     "time_synced",
+    // Okumanin hangi fiziksel sayaca ait oldugu. Kurulum kaydi yoksa bos kalir.
+    // Sayac degisiminden sonraki okumalar oncekilerle karsilastirilamayacagi icin
+    // disa aktarimda bu sutun olmadan veri yaniltici olur.
+    "sayac_seri_no",
   ];
   // Türkçe yerel ayarlı Excel sütun ayırıcı olarak noktalı virgül bekler.
   const SEP = ";";
@@ -142,6 +154,7 @@ export function readingsToCSV(readings: MeterReading[]): string {
       r.sayac_delta,
       r.devir_delta,
       r.time_synced === false ? 0 : 1,
+      meterSerialAt(periods, r.recorded_at),
     ]
       .map(escape)
       .join(SEP)
@@ -163,4 +176,26 @@ export function downloadCSV(filename: string, csv: string): void {
   a.click();
   document.body.removeChild(a);
   URL.revokeObjectURL(url);
+}
+
+// Bir okumanın hangi sayaca ait olduğunu kurulum dönemlerinden bul.
+//
+// recorded_at (SUNUCU saati) kullanılır, timestamp_unix DEĞİL: ikincisi cihazdan
+// gelir ve time_synced false iken sunucu saatiyle ikame edilir, yani 1970'e düşüp
+// her aralığın dışında kalabilir.
+//
+// Dönem yoksa (envanter kaydı girilmemiş cihaz) null döner — bu beklenen durum.
+export function meterSerialAt(
+  periods: InstallationPeriod[],
+  recordedAt: string
+): string | null {
+  const t = new Date(recordedAt).getTime();
+  for (const p of periods) {
+    const from = new Date(p.started_at).getTime();
+    const to = p.ended_at ? new Date(p.ended_at).getTime() : Infinity;
+    // Üst sınır dışlayıcı: kapanan dönemin ended_at'i ile açılan dönemin
+    // started_at'i AYNI değer, yani sınır anındaki okuma YENİ döneme ait olmalı.
+    if (t >= from && t < to) return p.serial_no;
+  }
+  return null;
 }

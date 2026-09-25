@@ -1,7 +1,12 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import type { DeviceWithStats, MeterReading, DeviceCommand } from "@/types";
+import type {
+  DeviceWithStats,
+  MeterReading,
+  DeviceCommand,
+  InstallationPeriod,
+} from "@/types";
 import {
   formatTimestamp,
   computeGaps,
@@ -36,6 +41,10 @@ export default function Home() {
   const [versionFilter, setVersionFilter] = useState<string | null>(null);
   // Seçili cihazın okumalarında geçen benzersiz firmware sürümleri (dropdown için).
   const [deviceVersions, setDeviceVersions] = useState<string[]>([]);
+  // Seçili cihazın kurulum dönemleri: grafikteki sınır çizgileri ve CSV'deki sayaç
+  // seri no sütunu için. Cihaz değişiminde çekilir, POLL EDİLMEZ — envanter verisi
+  // yalnızca biri form gönderince değişir.
+  const [periods, setPeriods] = useState<InstallationPeriod[]>([]);
   const [readings, setReadings] = useState<MeterReading[]>([]);
   // Seçili cihazın kalibrasyon/konfig komut geçmişi (panel için).
   const [commands, setCommands] = useState<DeviceCommand[]>([]);
@@ -102,6 +111,21 @@ export default function Home() {
       setDeviceVersions(json.versions);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
+    }
+  }, []);
+
+  // Seçili cihazın kurulum dönemlerini çek (envanter kaydı varsa).
+  const loadPeriods = useCallback(async (deviceId: string) => {
+    try {
+      const res = await fetch(
+        `/api/registry/periods?device_id=${encodeURIComponent(deviceId)}`
+      );
+      const json = await res.json();
+      // Envanter opsiyoneldir: kaydı olmayan cihaz için hata banner'ı gösterme.
+      if (!json.success) return;
+      setPeriods(json.periods);
+    } catch {
+      // Envanter yoksa grafik işaretsiz çalışmaya devam eder.
     }
   }, []);
 
@@ -195,7 +219,8 @@ export default function Home() {
     if (!selected) return;
     // eslint-disable-next-line react-hooks/set-state-in-effect
     loadVersions(selected);
-  }, [selected, loadVersions]);
+    loadPeriods(selected);
+  }, [selected, loadVersions, loadPeriods]);
 
   // Seçili cihazın tüm okumalarını sil.
   async function handleReset() {
@@ -295,7 +320,7 @@ export default function Home() {
         rows = json.readings;
       }
       if (rows.length === 0) return;
-      downloadCSV(`okumalar-${selected}.csv`, readingsToCSV(rows));
+      downloadCSV(`okumalar-${selected}.csv`, readingsToCSV(rows, periods));
       setError(null);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Bilinmeyen hata");
@@ -499,7 +524,7 @@ export default function Home() {
 
       {/* Grafik */}
       <section className="mb-6">
-        <DeltaChart readings={readings} />
+        <DeltaChart readings={readings} periods={periods} />
       </section>
 
       {/* Okumalar: filtreler + tablo (sol) · zaman çizelgesi + kopma raporu (sağ) */}
