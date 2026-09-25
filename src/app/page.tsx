@@ -19,11 +19,12 @@ import GapReport from "@/components/GapReport";
 import DeviceConfigPanel from "@/components/DeviceConfigPanel";
 import DeviceHealthPanel from "@/components/DeviceHealthPanel";
 import DeviceAdmin from "@/components/DeviceAdmin";
+import DeviceRegistryPanel from "@/components/DeviceRegistryPanel";
 
 const REFRESH_MS = 5_000;
 
-// Ana görünüm sekmeleri: okuma/analiz paneli vs. cihaz sağlık paneli.
-type View = "dashboard" | "health";
+// Ana görünüm sekmeleri: okuma/analiz paneli · cihaz sağlığı · kurulum envanteri.
+type View = "dashboard" | "health" | "registry";
 
 export default function Home() {
   const [devices, setDevices] = useState<DeviceWithStats[]>([]);
@@ -424,11 +425,12 @@ export default function Home() {
         </div>
       </header>
 
-      {/* Sekme çubuğu: Okuma Paneli · Cihaz Sağlığı */}
+      {/* Sekme çubuğu: Okuma Paneli · Cihaz Sağlığı · Kurulum & İş Geçmişi */}
       <nav className="mb-6 flex gap-1 border-b border-zinc-200 dark:border-zinc-800">
         {([
           { key: "dashboard", label: "Okuma Paneli" },
           { key: "health", label: "Cihaz Sağlığı" },
+          { key: "registry", label: "Kurulum & İş Geçmişi" },
         ] as const).map((t) => (
           <button
             key={t.key}
@@ -450,13 +452,29 @@ export default function Home() {
         </div>
       )}
 
-      {view === "health" ? (
-        selected ? (
+      {/* Üç sekme, üç ayrı koşul. İç içe ternary okunmaz hale gelirdi. */}
+      {view === "health" &&
+        (selected ? (
           <DeviceHealthPanel deviceId={selected} />
         ) : (
           <p className="text-sm text-zinc-400">Cihaz seçin.</p>
-        )
-      ) : (
+        ))}
+
+      {view === "registry" && (
+        <DeviceRegistryPanel
+          deviceId={selected}
+          onSelectDevice={(id) => {
+            setSelected(id);
+            setVersionFilter(null);
+            setConfirmReset(null);
+            setConfirmDeleteDevice(null);
+            clearFilters();
+          }}
+          onDevicesChanged={loadDevices}
+        />
+      )}
+
+      {view === "dashboard" && (
       <>
       {/* Özet kartlar */}
       <section className="mb-6 grid grid-cols-2 gap-4 lg:grid-cols-4">

@@ -148,6 +148,27 @@ export async function DELETE(request: NextRequest) {
   const client = await pool.connect();
   try {
     await client.query("BEGIN");
+
+    // Kurulum geçmişi olan cihaz SİLİNMEZ. installations satırları korunması istenen
+    // geçmişin ta kendisi; onları silmek adresin zaman çizelgesini yok eder ve
+    // iş emirlerini yetim bırakırdı. Cihaz sahadan çıktıysa doğru yol söküm /
+    // ESP32 değişimi kaydı açmaktır.
+    const installed = await client.query(
+      "SELECT 1 FROM installations WHERE device_id = $1 LIMIT 1",
+      [deviceId]
+    );
+    if (installed.rowCount && installed.rowCount > 0) {
+      await client.query("ROLLBACK");
+      return NextResponse.json(
+        {
+          success: false,
+          error:
+            "Bu cihazın kurulum geçmişi var ve silinemez. Cihaz sahadan çıktıysa 'ESP32 değişimi' ya da 'söküm' kaydı açın.",
+        },
+        { status: 409 }
+      );
+    }
+
     // FK kısıtı nedeniyle önce çocuk tablolar, sonra cihaz silinir.
     // device_commands da devices'a FK ile bağlı: atlanırsa komut geçmişi olan
     // bir cihaz hiç silinemez (FK ihlali → 500).

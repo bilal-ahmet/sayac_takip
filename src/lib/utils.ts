@@ -27,6 +27,34 @@ export function normalizeDeviceId(
   return typeof raw === "string" ? raw.trim() : undefined;
 }
 
+// MAC adresini tek biçime indirger: ayraçsız, büyük harf.
+// Telemetri "188B0E88947C" gönderir, cihazın yerel ekranı "18:8B:0E:88:94:7C"
+// gösterebilir; merkez ikisini aynı kimlik saymalı.
+//
+// Yalnızca ÜÇ KESİN MAC biçiminden birine uyan girdiler dönüştürülür; uymayan her
+// şey trim'lenmiş haliyle aynen döner. Bu bilinçli: "12 hex + isteğe bağlı ayraç"
+// gibi gevşek bir kural "18:8B0E-88947C" gibi bozuk girdileri de kabul ederdi, ve
+// koşulsuz büyük-harfe-çevirme SMOKE01 / TEST-01 gibi MAC olmayan cihaz id'lerini
+// bozardı.
+const MAC_FORMATS = [
+  /^[0-9A-Fa-f]{12}$/, //                        188B0E88947C
+  /^([0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}$/, //  18:8B:0E:88:94:7C · 18-8B-...
+  /^([0-9A-Fa-f]{4}\.){2}[0-9A-Fa-f]{4}$/, //    188b.0e88.947c
+];
+
+export function canonicalizeDeviceId(raw: string): string {
+  const s = raw.trim();
+  if (!MAC_FORMATS.some((re) => re.test(s))) return s;
+  return s.replace(/[:.-]/g, "").toUpperCase();
+}
+
+// Sayaç seri numarasını tek biçime indirger. serial_no UNIQUE olduğu için yazarken
+// de ararken de aynı dönüşümden geçmeli, aksi halde "abc123" ile "ABC123" iki ayrı
+// sayaç olur.
+export function canonicalizeSerial(raw: string): string {
+  return raw.trim().toUpperCase();
+}
+
 // RSSI (dBm) → insan-okunur sinyal kalitesi etiketi ve renk sınıfı.
 // Cihaz signal_quality (0-100) göndermezse RSSI'dan kaba bir etiket türetmek için.
 export function rssiQuality(rssi: number | null | undefined): {

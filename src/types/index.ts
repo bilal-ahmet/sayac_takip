@@ -150,3 +150,136 @@ export interface DeviceHealthResponse {
   online: boolean; // last_seen eşik içinde mi
   last_seen_unix: number | null; // son okuma veya son sağlık raporundan büyük olanı
 }
+
+// ---------------------------------------------------------------------------
+// Varlık envanteri: kurulum kaydı + iş geçmişi
+// ---------------------------------------------------------------------------
+
+// installation_points tablosu satırı — montaj noktası / tesisat.
+// Sayaç da ESP32 de değişse sabit kalan çıpa.
+export interface InstallationPoint {
+  id: number;
+  facility_code: string | null; // tesisat ID
+  address: string;
+  meter_location: string | null; // sayacın adresteki konumu
+  notes: string | null;
+  created_at: string; // ISO timestamptz
+}
+
+// meters tablosu satırı — fiziksel sayaç.
+export interface Meter {
+  id: number;
+  serial_no: string;
+  brand: string | null;
+  model: string | null;
+  // Darbe sabiti (imp/birim). sayac değerini hacme çevirmek için gerekli; farklı
+  // sabitli bir sayaca geçilince okuma serisinin anlamı değişir.
+  pulse_per_unit: number | null;
+  tech_label: string | null;
+  notes: string | null;
+  created_at: string;
+}
+
+// personnel tablosu satırı — işi yapan kişi. Silinmez, pasife alınır.
+export interface Person {
+  id: number;
+  full_name: string;
+  role: string | null;
+  phone: string | null;
+  active: boolean;
+  created_at: string;
+}
+
+// İş emri tipleri. calibration/COMMAND_TYPES gibi çalışma zamanında da gerekli
+// (açılır liste + tipe göre etki haritası), o yüzden const dizi + türetilmiş tip.
+//   kurulum        → ilk kurulum; kurulumu açan iş emri
+//   ariza/kontrol/onarim → yalnızca kayıt, eşleşmeye dokunmaz
+//   sayac_degisimi → kurulum kapanır, aynı cihaz + YENİ sayaçla yenisi açılır
+//   esp32_degisimi → kurulum kapanır, aynı sayaç + YENİ cihazla yenisi açılır
+//   sokum          → kurulum kapanır, yenisi açılmaz
+export const WORK_ORDER_TYPES = [
+  "kurulum",
+  "ariza",
+  "kontrol",
+  "onarim",
+  "sayac_degisimi",
+  "esp32_degisimi",
+  "sokum",
+] as const;
+
+export type WorkOrderType = (typeof WORK_ORDER_TYPES)[number];
+
+// work_orders tablosu satırı — append-only olay kaydı.
+export interface WorkOrder {
+  id: number;
+  installation_point_id: number;
+  type: WorkOrderType;
+  performed_by_id: number;
+  performed_by_name: string; // personnel JOIN'inden gelir
+  performed_at: string; // işin yapıldığı an (kullanıcı girer)
+  reason: string | null;
+  work_done: string | null;
+  // Metin anlık görüntüler: ilgili cihaz/sayaç kaydı silinse bile kalır.
+  old_meter_serial: string | null;
+  new_meter_serial: string | null;
+  old_mac: string | null;
+  new_mac: string | null;
+  new_seal_no: string | null;
+  notes: string | null;
+  created_at: string; // sunucu saati; performed_at ile farkı geri tarihlemeyi gösterir
+}
+
+// installations tablosu satırı — zamansal (nokta, sayaç, cihaz) eşleşmesi.
+export interface Installation {
+  id: number;
+  installation_point_id: number;
+  meter_id: number;
+  device_id: string | null; // NULL = ESP32 sökülü, sayaç yerinde
+  started_at: string;
+  ended_at: string | null; // NULL = aktif eşleşme
+  initial_index: number | null; // başlangıç endeksi
+  seal_no: string | null;
+  notes: string | null;
+  opened_by_work_order_id: number;
+  closed_by_work_order_id: number | null;
+  created_at: string;
+}
+
+// Kurulum + ilişkili sayaç ve açan iş emri bilgisi (panelin gösterdiği birleşik satır).
+export interface InstallationDetail extends Installation {
+  meter: Meter;
+  opened_by: { performed_by_name: string; performed_at: string; type: WorkOrderType };
+}
+
+// GET /api/registry?device_id= yanıtı — paneli tek turda besler.
+export interface RegistryResponse {
+  success: boolean;
+  point: InstallationPoint | null; // null = bu cihaz hiç kurulmamış
+  current: InstallationDetail | null; // aktif eşleşme (ended_at IS NULL)
+  installations: InstallationDetail[]; // kapanmışlar dahil, started_at DESC
+  work_orders: WorkOrder[]; // performed_at DESC
+}
+
+// GET /api/registry/search?q= — tek bir kurulum eşleşmesi.
+export interface RegistrySearchResult {
+  installation_id: number;
+  installation_point_id: number;
+  facility_code: string | null;
+  address: string;
+  meter_location: string | null;
+  device_id: string | null;
+  serial_no: string;
+  started_at: string;
+  ended_at: string | null;
+  active: boolean; // ended_at === null
+}
+
+// GET /api/registry/search?q= yanıtı.
+// `devices`, kayıtlı ama hiç kurulmamış cihazları ayrı tutar: aksi halde yeni
+// tanımlanmış bir MAC aratıldığında sonuç boş döner ve kullanıcı kaydın kaybolduğunu
+// sanır.
+export interface RegistrySearchResponse {
+  success: boolean;
+  results: RegistrySearchResult[];
+  devices: { device_id: string; name: string | null }[];
+}
